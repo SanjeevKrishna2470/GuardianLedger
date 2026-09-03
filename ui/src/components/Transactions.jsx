@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Inbox } from 'lucide-react';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 const Transactions = () => {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -9,7 +11,7 @@ const Transactions = () => {
   useEffect(() => {
     const fetchTransactions = async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/transactions');
+        const res = await fetch(`${API_BASE}/api/transactions`);
         if (res.ok) {
           setTransactions(await res.json());
         } else {

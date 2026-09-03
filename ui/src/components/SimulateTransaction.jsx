@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 function SimulateTransaction({ onSimulate }) {
   const [isOpen, setIsOpen] = useState(false);
   const [type, setType] = useState('CLEAN');
@@ -10,7 +12,7 @@ function SimulateTransaction({ onSimulate }) {
     setLoading(true);
     setMessage('');
     try {
-      const response = await fetch('http://localhost:8000/api/simulate', {
+      const response = await fetch(`${API_BASE}/api/simulate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

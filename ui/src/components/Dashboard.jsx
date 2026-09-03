@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { TrendingUp, AlertTriangle, ShieldAlert, Zap } from 'lucide-react';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 const Dashboard = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -8,7 +10,7 @@ const Dashboard = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/dashboard');
+        const res = await fetch(`${API_BASE}/api/dashboard`);
         if (res.ok) {
           setData(await res.json());
         } else {
@@ -30,7 +32,7 @@ const Dashboard = () => {
         setLoading(false);
       }
     };
-    fetch('http://localhost:8000/api/queue').catch(() => {});
+    fetch(`${API_BASE}/api/queue`).catch(() => {});
     fetchData();
   }, []);
 

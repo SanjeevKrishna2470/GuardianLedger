@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { CheckCircle, Check, X } from 'lucide-react';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 const ReviewQueue = () => {
   const [queue, setQueue] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -9,7 +11,7 @@ const ReviewQueue = () => {
   useEffect(() => {
     const fetchQueue = async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/queue');
+        const res = await fetch(`${API_BASE}/api/queue`);
         if (res.ok) {
           setQueue(await res.json());
         } else {
@@ -30,7 +32,7 @@ const ReviewQueue = () => {
 
   const handleAction = async (txn_ref, decision) => {
     try {
-      await fetch('http://localhost:8000/api/action', {
+      await fetch(`${API_BASE}/api/action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ txn_ref, decision })
