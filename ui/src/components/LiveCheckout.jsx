@@ -33,9 +33,9 @@ function LiveCheckout() {
         throw new Error(orderData.detail || orderData.message || `Failed to create order (HTTP ${orderRes.status})`);
       }
 
-      const razorpayKey = import.meta.env.VITE_RAZORPAY_KEY_ID || orderData.key_id || '';
+      const razorpayKey = orderData.key_id || import.meta.env.RAZORPAY_KEY_ID || import.meta.env.VITE_RAZORPAY_KEY_ID || '';
       if (!razorpayKey) {
-        throw new Error('Razorpay Key ID is missing. Please set RAZORPAY_KEY_ID in backend environment variables or VITE_RAZORPAY_KEY_ID in frontend environment.');
+        throw new Error('Razorpay Key ID missing. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in your backend environment variables.');
       }
 
       // Step 2: Open Razorpay Checkout
