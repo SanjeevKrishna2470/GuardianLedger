@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Inbox } from 'lucide-react';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { API_BASE } from '../config';
 
 const Transactions = () => {
   const [transactions, setTransactions] = useState([]);

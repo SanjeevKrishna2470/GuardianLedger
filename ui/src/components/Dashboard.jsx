@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { TrendingUp, AlertTriangle, ShieldAlert, Zap } from 'lucide-react';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { API_BASE } from '../config';
 
 const Dashboard = () => {
   const [data, setData] = useState(null);
@@ -75,22 +74,22 @@ const Dashboard = () => {
       <div className="metrics-grid">
         <div className="metric-card">
           <div className="metric-icon brand"><TrendingUp size={20} /></div>
-          <div className="metric-value">{data?.match_rate || '0'}%</div>
+          <div className="metric-value">{data?.match_rate ?? 0}%</div>
           <div className="metric-label">Match Rate</div>
         </div>
         <div className="metric-card">
           <div className="metric-icon warning"><AlertTriangle size={20} /></div>
-          <div className="metric-value">{data?.total_exceptions || '0'}</div>
+          <div className="metric-value">{data?.total_exceptions ?? data?.total_processed ?? 0}</div>
           <div className="metric-label">Exceptions</div>
         </div>
         <div className="metric-card">
           <div className="metric-icon danger"><ShieldAlert size={20} /></div>
-          <div className="metric-value">{data?.total_quarantined || '0'}</div>
+          <div className="metric-value">{data?.total_quarantined ?? data?.quarantine_count ?? 0}</div>
           <div className="metric-label">Quarantined</div>
         </div>
         <div className="metric-card">
           <div className="metric-icon info"><Zap size={20} /></div>
-          <div className="metric-value">{data?.throughput || '0'}<span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)', marginLeft: '4px' }}>/s</span></div>
+          <div className="metric-value">{data?.throughput ?? data?.throughput_records_per_sec ?? 0}<span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)', marginLeft: '4px' }}>/s</span></div>
           <div className="metric-label">Throughput</div>
         </div>
       </div>
