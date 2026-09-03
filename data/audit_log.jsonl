@@ -1,0 +1,2 @@
+{"timestamp": "2026-09-03T14:38:52.971640", "txn_ref": "UNKNOWN", "m1_match_result": "FAILED", "m2_category": "SECURITY_EXCEPTION", "m3_extracted": {"error": "Signature mismatch"}, "m4_action": "QUARANTINE", "m4_reason": "Webhook signature verification failed"}
+{"timestamp": "2026-09-03T14:38:52.996123", "txn_ref": "pay_adversarial001", "m1_match_result": "FAILED", "m2_category": "DUPLICATE", "m3_extracted": {"event_id": "evt_dedup_test_001"}, "m4_action": "EXCEPTION", "m4_reason": "Duplicate webhook event: evt_dedup_test_001"}

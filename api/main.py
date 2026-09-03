@@ -1,0 +1,289 @@
+import json
+import os
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+app = FastAPI(title="Guardian Ledger API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+
+class ActionRequest(BaseModel):
+    txn_ref: str
+    decision: str  # "approve" or "reject"
+    reviewer_note: str = ""
+
+@app.get("/api/dashboard")
+def get_dashboard():
+    report_path = os.path.join(DATA_DIR, "report.json")
+    if not os.path.exists(report_path):
+        return {"error": "No report found. Run the pipeline first."}
+    with open(report_path) as f:
+        return json.load(f)
+
+@app.get("/api/queue")
+def get_review_queue():
+    log_path = os.path.join(DATA_DIR, "audit_log.jsonl")
+    if not os.path.exists(log_path):
+        return []
+    
+    queue = []
+    with open(log_path) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            action = entry.get("m4_action", "")
+            if action in ("REVIEW", "EXCEPTION", "QUARANTINE"):
+                queue.append(entry)
+    return queue
+
+@app.get("/api/transactions")
+def get_all_transactions():
+    log_path = os.path.join(DATA_DIR, "audit_log.jsonl")
+    if not os.path.exists(log_path):
+        return []
+    
+    txns = []
+    with open(log_path) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            txns.append(json.loads(line))
+    return txns
+
+class SimulateRequest(BaseModel):
+    type: str
+
+import uuid
+import datetime
+import random
+import sys
+
+# Ensure root path is accessible
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from engine.classifier import classify_exception
+from engine.trust_boundary import verify_proposal, Action
+from engine.router import route_action
+from report.audit_log import logger
+from report.report import generate_report
+
+@app.post("/api/simulate")
+def simulate_transaction(req: SimulateRequest):
+    txn_ref = f"SIM-{uuid.uuid4().hex[:8]}"
+    base_amount = round(random.uniform(50.0, 500.0), 2)
+    today = datetime.date.today()
+    
+    gw_amt = base_amount
+    fee = round(base_amount * 0.02, 2)
+    bank_amt = round(base_amount - fee, 2)
+    ledger_amt = bank_amt
+    
+    gw_date = today
+    bank_date = today + datetime.timedelta(days=1)
+    
+    if req.type == "FEE_MISMATCH":
+        bank_amt -= 5.0
+    elif req.type == "TIMING_LAG":
+        bank_date = today + datetime.timedelta(days=10)
+    
+    gw_rec = {
+        'amount': gw_amt, 'currency': 'USD', 'timestamp': f"{gw_date}T10:00:00Z", 'status': 'COMPLETED'
+    }
+    bank_rec = {
+        'settlement_id': f"SET-{uuid.uuid4().hex[:6]}", 'settled_amount': bank_amt, 'settlement_date': str(bank_date), 'fee_deducted': fee
+    }
+    ledger_rec = {
+        'entry_id': f"LEDG-{uuid.uuid4().hex[:6]}", 'expected_amount': ledger_amt, 'booked_date': str(today), 'account': 'Revenue'
+    }
+    
+    if req.type == "ORPHAN":
+        bank_rec = None
+        ledger_rec = None
+        
+    status = "MATCHED"
+    if req.type != "CLEAN":
+        status = "NEEDS_CLASSIFICATION"
+        
+    record = {
+        'txn_ref': txn_ref,
+        'match_status': status,
+        'gateway_record': [gw_rec] if gw_rec else [],
+        'bank_record': [bank_rec] if bank_rec else [],
+        'ledger_record': [ledger_rec] if ledger_rec else []
+    }
+    
+    category = None
+    extracted_data = None
+    
+    if status == "NEEDS_CLASSIFICATION":
+        category = classify_exception(record)
+        proposed_action = Action.EXCEPTION if category else Action.REVIEW
+    else:
+        proposed_action = Action.MATCH
+        
+    final_action, reason = verify_proposal(record, record, proposed_action)
+    route_action(final_action)
+    
+    # Overwrite the logger file if needed? No, logger appends.
+    # But logger needs DATA_DIR? logger uses "data/audit_log.jsonl".
+    # main.py is run from root or api? Usually root. 
+    logger.log_transaction(
+        txn_ref=txn_ref,
+        match_result=status,
+        category=category,
+        extracted_data=extracted_data,
+        action=final_action,
+        reason=reason
+    )
+    
+    generate_report()
+    
+    return {"status": "ok", "txn_ref": txn_ref, "type": req.type, "action": final_action.value}
+
+@app.post("/api/action")
+def post_action(req: ActionRequest):
+    # In a production system, this would write to a database.
+    # For the MVP demo, we append to a decisions log.
+    decisions_path = os.path.join(DATA_DIR, "decisions.jsonl")
+    entry = {
+        "txn_ref": req.txn_ref,
+        "decision": req.decision,
+        "reviewer_note": req.reviewer_note
+    }
+    with open(decisions_path, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+    return {"status": "ok", "decision": req.decision, "txn_ref": req.txn_ref}
+
+# --- Razorpay Integration ---
+
+import razorpay
+from fastapi import Request, HTTPException, Header
+
+def get_razorpay_client():
+    key_id = os.environ.get("RAZORPAY_KEY_ID")
+    key_secret = os.environ.get("RAZORPAY_KEY_SECRET")
+    if not key_id or not key_secret:
+        raise HTTPException(status_code=500, detail="Razorpay credentials missing in environment variables.")
+    return razorpay.Client(auth=(key_id, key_secret))
+
+class OrderRequest(BaseModel):
+    amount: int
+    currency: str = "INR"
+
+@app.post("/api/orders")
+def create_order(req: OrderRequest):
+    client = get_razorpay_client()
+    data = {
+        "amount": req.amount,
+        "currency": req.currency,
+        "receipt": f"receipt_{uuid.uuid4().hex[:8]}",
+        "payment_capture": 1
+    }
+    try:
+        order = client.order.create(data=data)
+        return {"order_id": order["id"], "amount": order["amount"], "currency": order["currency"]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/webhooks/razorpay")
+async def razorpay_webhook(request: Request, x_razorpay_signature: str = Header(None)):
+    raw_body = await request.body()
+    webhook_secret = os.environ.get("RAZORPAY_WEBHOOK_SECRET")
+    
+    if not webhook_secret:
+        print("WARNING: Webhook received but RAZORPAY_WEBHOOK_SECRET not set.")
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
+        
+    if not x_razorpay_signature:
+        raise HTTPException(status_code=400, detail="Missing signature")
+        
+    client = get_razorpay_client()
+    try:
+        # Feature 3: Signature Verification
+        client.utility.verify_webhook_signature(raw_body.decode('utf-8'), x_razorpay_signature, webhook_secret)
+    except Exception as e:
+        print(f"SECURITY EXCEPTION: Signature mismatch! {e}")
+        # Log the security exception
+        logger.log_transaction(
+            txn_ref="UNKNOWN",
+            match_result="FAILED",
+            category="SECURITY_EXCEPTION",
+            extracted_data={"error": "Signature mismatch"},
+            action=Action.QUARANTINE,
+            reason="Webhook signature verification failed"
+        )
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    # Feature 4: Dedup + Ordering
+    payload = json.loads(raw_body)
+    event_id = request.headers.get("x-razorpay-event-id", "unknown")
+    
+    # Simple JSONL deduplication store
+    dedup_path = os.path.join(DATA_DIR, "processed_event_ids.jsonl")
+    if os.path.exists(dedup_path):
+        with open(dedup_path, "r") as f:
+            processed_ids = [json.loads(line.strip()).get("event_id") for line in f if line.strip()]
+        if event_id in processed_ids:
+            print(f"DUPLICATE EXCEPTION: Event ID {event_id} already processed.")
+            logger.log_transaction(
+                txn_ref=payload.get("payload", {}).get("payment", {}).get("entity", {}).get("id", "UNKNOWN"),
+                match_result="FAILED",
+                category="DUPLICATE",
+                extracted_data={"event_id": event_id},
+                action=Action.EXCEPTION,
+                reason=f"Duplicate webhook event: {event_id}"
+            )
+            return {"status": "ignored", "reason": "duplicate"}
+
+    # Save to dedup store
+    with open(dedup_path, "a") as f:
+        f.write(json.dumps({"event_id": event_id, "timestamp": str(datetime.datetime.now())}) + "\n")
+
+    event_type = payload.get("event")
+    print(f"Processing genuine webhook event: {event_type} - {event_id}")
+
+    # Process events
+    if event_type == "payment.captured":
+        payment_entity = payload["payload"]["payment"]["entity"]
+        txn_ref = payment_entity["id"]
+        
+        # Log the captured payment as a matched transaction for demo purposes
+        # In a full system, this would insert into gateway/bank tables for the matcher
+        logger.log_transaction(
+            txn_ref=txn_ref,
+            match_result="MATCHED",
+            category=None,
+            extracted_data={"event": "payment.captured", "amount": payment_entity["amount"]},
+            action=Action.MATCH,
+            reason="Razorpay payment captured successfully"
+        )
+        
+    elif event_type == "refund.processed":
+        refund_entity = payload["payload"]["refund"]["entity"]
+        txn_ref = refund_entity["payment_id"]
+        
+        # Log refund
+        logger.log_transaction(
+            txn_ref=txn_ref,
+            match_result="NEEDS_CLASSIFICATION",
+            category="REFUND",
+            extracted_data={"event": "refund.processed", "refund_id": refund_entity["id"], "amount": refund_entity["amount"]},
+            action=Action.REVIEW,
+            reason="Refund processed by Razorpay"
+        )
+
+    generate_report()
+    return {"status": "ok"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

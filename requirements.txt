@@ -1,0 +1,8 @@
+pandas==2.2.2
+fastapi
+uvicorn
+pydantic
+google-genai
+razorpay
+pytest
+httpx

@@ -1,0 +1,11 @@
+{
+  "total_processed": 2,
+  "match_rate": 0.0,
+  "quarantine_count": 0,
+  "false_quarantine_rate": 0,
+  "throughput_records_per_sec": 0,
+  "exception_breakdown": {
+    "ORPHAN": 1,
+    "AMOUNT_DRIFT": 1
+  }
+}
