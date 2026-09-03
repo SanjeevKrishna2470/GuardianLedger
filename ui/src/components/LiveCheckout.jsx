@@ -33,9 +33,14 @@ function LiveCheckout() {
         throw new Error(orderData.detail || orderData.message || `Failed to create order (HTTP ${orderRes.status})`);
       }
 
+      const razorpayKey = import.meta.env.VITE_RAZORPAY_KEY_ID || orderData.key_id || '';
+      if (!razorpayKey) {
+        throw new Error('Razorpay Key ID is missing. Please set RAZORPAY_KEY_ID in backend environment variables or VITE_RAZORPAY_KEY_ID in frontend environment.');
+      }
+
       // Step 2: Open Razorpay Checkout
       const options = {
-        key: import.meta.env.VITE_RAZORPAY_KEY_ID || '',
+        key: razorpayKey,
         amount: orderData.amount,
         currency: orderData.currency,
         name: 'Guardian Ledger',

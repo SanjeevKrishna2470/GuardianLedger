@@ -182,6 +182,7 @@ class OrderRequest(BaseModel):
 @app.post("/api/orders")
 def create_order(req: OrderRequest):
     client = get_razorpay_client()
+    key_id = os.environ.get("RAZORPAY_KEY_ID", "")
     data = {
         "amount": req.amount,
         "currency": req.currency,
@@ -190,7 +191,12 @@ def create_order(req: OrderRequest):
     }
     try:
         order = client.order.create(data=data)
-        return {"order_id": order["id"], "amount": order["amount"], "currency": order["currency"]}
+        return {
+            "order_id": order["id"],
+            "amount": order["amount"],
+            "currency": order["currency"],
+            "key_id": key_id
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
