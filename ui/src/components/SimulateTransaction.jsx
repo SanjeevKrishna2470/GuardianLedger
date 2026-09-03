@@ -18,14 +18,17 @@ function SimulateTransaction({ onSimulate }) {
         },
         body: JSON.stringify({ type }),
       });
+      const text = await response.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch {}
+
       if (response.ok) {
-        const data = await response.json();
-        setMessage(`Success! Simulated ${data.txn_ref} (${data.action})`);
+        setMessage(`Success! Simulated ${data.txn_ref || 'transaction'} (${data.action || 'processed'})`);
         if (onSimulate) {
           onSimulate();
         }
       } else {
-        setMessage('Simulation failed.');
+        setMessage(data.detail || data.message || `Simulation failed (HTTP ${response.status}).`);
       }
     } catch (error) {
       setMessage(`Error: ${error.message}`);

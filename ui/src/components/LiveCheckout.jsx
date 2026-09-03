@@ -21,12 +21,17 @@ function LiveCheckout() {
         body: JSON.stringify({ amount: amount * 100, currency }), // Razorpay expects paise
       });
 
-      if (!orderRes.ok) {
-        const err = await orderRes.json();
-        throw new Error(err.detail || 'Failed to create order');
+      let orderData;
+      const text = await orderRes.text();
+      try {
+        orderData = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(text || `Server returned HTTP ${orderRes.status}`);
       }
 
-      const orderData = await orderRes.json();
+      if (!orderRes.ok) {
+        throw new Error(orderData.detail || orderData.message || `Failed to create order (HTTP ${orderRes.status})`);
+      }
 
       // Step 2: Open Razorpay Checkout
       const options = {
