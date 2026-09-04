@@ -7,3 +7,10 @@ razorpay
 pytest
 httpx
 gunicorn
+
+passlib
+bcrypt==3.2.2
+python-jose[cryptography]
+python-multipart
+cryptography
+psycopg2-binary
