@@ -3,7 +3,6 @@ import { LayoutDashboard, ListChecks, Shield, AlertTriangle, Search, Bell, Credi
 import Dashboard from './components/Dashboard'
 import ReviewQueue from './components/ReviewQueue'
 import Transactions from './components/Transactions'
-import SimulateTransaction from './components/SimulateTransaction'
 import LiveCheckout from './components/LiveCheckout'
 import './App.css'
 
@@ -84,7 +83,6 @@ function App() {
             </Routes>
           </div>
         </main>
-        <SimulateTransaction onSimulate={() => window.location.reload()} />
       </div>
     </BrowserRouter>
   )

@@ -16,12 +16,9 @@ const Transactions = () => {
         } else {
           throw new Error('Failed to fetch transactions');
         }
-      } catch {
-        setTransactions([
-          { txn_ref: 'TXN-9001', match_result: 'MATCHED', category: 'Settlement', action: 'AUTO', reason: 'Exact match' },
-          { txn_ref: 'TXN-1001', match_result: 'MANUAL', category: 'Settlement', action: 'APPROVE', reason: 'Amount mismatch ($0.05)' },
-          { txn_ref: 'TXN-8002', match_result: 'MATCHED', category: 'Funding', action: 'AUTO', reason: 'Fuzzy match on date' }
-        ]);
+      } catch (err) {
+        console.error('Fetch error:', err);
+        setTransactions([]);
       } finally {
         setLoading(false);
       }

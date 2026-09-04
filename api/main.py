@@ -37,8 +37,8 @@ class ActionRequest(BaseModel):
 @app.post("/api/run-pipeline")
 def run_pipeline_endpoint():
     try:
-        from run import main as run_pipeline_main
-        run_pipeline_main()
+        from report.report import generate_report
+        generate_report()
         report_path = os.path.join(DATA_DIR, "report.json")
         if os.path.exists(report_path):
             with open(report_path) as f:
@@ -71,12 +71,8 @@ def get_all_transactions():
     conn.close()
     return [_row_to_dict(r) for r in rows]
 
-class SimulateRequest(BaseModel):
-    type: str
-
 import uuid
 import datetime
-import random
 import sys
 
 # Ensure root path is accessible
@@ -87,84 +83,7 @@ from engine.router import route_action
 from report.audit_log import logger
 from report.report import generate_report
 
-@app.post("/api/simulate")
-def simulate_transaction(req: SimulateRequest):
-    txn_ref = f"SIM-{uuid.uuid4().hex[:8]}"
-    base_amount = round(random.uniform(50.0, 500.0), 2)
-    today = datetime.date.today()
-    
-    gw_amt = base_amount
-    fee = round(base_amount * 0.02, 2)
-    bank_amt = round(base_amount - fee, 2)
-    ledger_amt = bank_amt
-    
-    gw_date = today
-    bank_date = today + datetime.timedelta(days=1)
-    
-    if req.type == "FEE_MISMATCH":
-        bank_amt -= 5.0
-    elif req.type == "TIMING_LAG":
-        bank_date = today + datetime.timedelta(days=10)
-    
-    gw_rec = {
-        'amount': gw_amt, 'currency': 'USD', 'timestamp': f"{gw_date}T10:00:00Z", 'status': 'COMPLETED'
-    }
-    bank_rec = {
-        'settlement_id': f"SET-{uuid.uuid4().hex[:6]}", 'settled_amount': bank_amt, 'settlement_date': str(bank_date), 'fee_deducted': fee
-    }
-    ledger_rec = {
-        'entry_id': f"LEDG-{uuid.uuid4().hex[:6]}", 'expected_amount': ledger_amt, 'booked_date': str(today), 'account': 'Revenue'
-    }
-    
-    if req.type == "ORPHAN":
-        bank_rec = None
-        ledger_rec = None
-        
-    status = "MATCHED"
-    if req.type != "CLEAN":
-        status = "NEEDS_CLASSIFICATION"
-        
-    record = {
-        'txn_ref': txn_ref,
-        'match_status': status,
-        'gateway_record': [gw_rec] if gw_rec else [],
-        'bank_record': [bank_rec] if bank_rec else [],
-        'ledger_record': [ledger_rec] if ledger_rec else []
-    }
-    
-    category = None
-    extracted_data = None
-    
-    if status == "NEEDS_CLASSIFICATION":
-        category = classify_exception(record)
-        proposed_action = Action.EXCEPTION if category else Action.REVIEW
-    else:
-        proposed_action = Action.MATCH
-        
-    final_action, reason = verify_proposal(record, record, proposed_action)
-    route_action(final_action)
-    
-    # Overwrite the logger file if needed? No, logger appends.
-    # But logger needs DATA_DIR? logger uses "data/audit_log.jsonl".
-    # main.py is run from root or api? Usually root. 
-    logger.log_transaction(
-        txn_ref=txn_ref,
-        match_result=status,
-        category=category,
-        extracted_data=extracted_data,
-        action=final_action,
-        reason=reason,
-        source="SIMULATION",
-        raw_evidence={
-            "gateway_record": gw_rec,
-            "bank_record": bank_rec,
-            "ledger_record": ledger_rec
-        }
-    )
-    
-    generate_report()
-    
-    return {"status": "ok", "txn_ref": txn_ref, "type": req.type, "action": final_action.value}
+# Simulate endpoint removed as per request to only handle real transactions.
 
 @app.post("/api/action")
 def post_action(req: ActionRequest):
