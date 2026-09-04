@@ -18,7 +18,9 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from fastapi.testclient import TestClient
-from api.main import app, DATA_DIR
+from api.main import app
+from report.db import _PROJECT_ROOT
+DATA_DIR = os.path.join(_PROJECT_ROOT, "data")
 
 client = TestClient(app)
 
@@ -83,6 +85,20 @@ def _clean_dedup_store():
     conn.close()
 
 
+def _setup_merchant_and_keys(monkeypatch):
+    """Create a test merchant and return their ID. Also mocks the environment if needed."""
+    from report.db import get_db
+    from api.crypto import encrypt_value
+    
+    merchant_id = "m_test_merchant"
+    conn = get_db()
+    with conn:
+        conn.execute("INSERT OR IGNORE INTO merchants (id, name, razorpay_webhook_secret_enc) VALUES (?, ?, ?)", 
+                     (merchant_id, "Test Merchant", encrypt_value(WEBHOOK_SECRET)))
+    conn.close()
+    return merchant_id
+
+
 # ---------------------------------------------------------------------------
 # Test 1: Bad Signature → must be rejected (HTTP 400)
 # ---------------------------------------------------------------------------
@@ -91,15 +107,13 @@ class TestBadSignature:
     """Webhooks with an incorrect HMAC signature must be rejected."""
 
     def test_bad_signature_returns_400(self, monkeypatch):
-        monkeypatch.setenv("RAZORPAY_KEY_ID", "rzp_test_key")
-        monkeypatch.setenv("RAZORPAY_KEY_SECRET", "rzp_test_secret")
-        monkeypatch.setenv("RAZORPAY_WEBHOOK_SECRET", WEBHOOK_SECRET)
-
+        merchant_id = _setup_merchant_and_keys(monkeypatch)
+        
         payload_bytes = json.dumps(SAMPLE_PAYMENT_PAYLOAD).encode()
         bad_signature = "deadbeef" * 8  # obviously wrong
 
         response = client.post(
-            "/api/webhooks/razorpay",
+            f"/api/webhooks/razorpay/{merchant_id}",
             content=payload_bytes,
             headers={
                 "Content-Type": "application/json",
@@ -121,14 +135,12 @@ class TestMissingSignature:
     """Webhooks without a signature header must be rejected."""
 
     def test_missing_signature_returns_400(self, monkeypatch):
-        monkeypatch.setenv("RAZORPAY_KEY_ID", "rzp_test_key")
-        monkeypatch.setenv("RAZORPAY_KEY_SECRET", "rzp_test_secret")
-        monkeypatch.setenv("RAZORPAY_WEBHOOK_SECRET", WEBHOOK_SECRET)
+        merchant_id = _setup_merchant_and_keys(monkeypatch)
 
         payload_bytes = json.dumps(SAMPLE_PAYMENT_PAYLOAD).encode()
 
         response = client.post(
-            "/api/webhooks/razorpay",
+            f"/api/webhooks/razorpay/{merchant_id}",
             content=payload_bytes,
             headers={
                 "Content-Type": "application/json",
@@ -156,9 +168,7 @@ class TestReplayedEventId:
         _clean_dedup_store()
 
     def test_duplicate_event_is_ignored(self, monkeypatch):
-        monkeypatch.setenv("RAZORPAY_KEY_ID", "rzp_test_key")
-        monkeypatch.setenv("RAZORPAY_KEY_SECRET", "rzp_test_secret")
-        monkeypatch.setenv("RAZORPAY_WEBHOOK_SECRET", WEBHOOK_SECRET)
+        merchant_id = _setup_merchant_and_keys(monkeypatch)
 
         event_id = "evt_dedup_test_001"
 
@@ -167,8 +177,8 @@ class TestReplayedEventId:
         conn = get_db()
         with conn:
             conn.execute(
-                "INSERT INTO processed_events (event_id, timestamp) VALUES (?, ?)",
-                (event_id, "2026-01-01T00:00:00")
+                "INSERT INTO processed_events (merchant_id, event_id, timestamp) VALUES (?, ?, ?)",
+                (merchant_id, event_id, "2026-01-01T00:00:00")
             )
         conn.close()
 
@@ -176,7 +186,7 @@ class TestReplayedEventId:
         valid_sig = _sign(payload_bytes, WEBHOOK_SECRET)
 
         response = client.post(
-            "/api/webhooks/razorpay",
+            f"/api/webhooks/razorpay/{merchant_id}",
             content=payload_bytes,
             headers={
                 "Content-Type": "application/json",

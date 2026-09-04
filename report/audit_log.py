@@ -7,26 +7,28 @@ from report.db import get_db
 class AuditLogger:
     def log_transaction(
         self,
-        txn_ref,
-        match_result,
-        category,
-        extracted_data,
-        action,
-        reason,
-        source="BATCH_PIPELINE",
-        raw_evidence=None,
+        merchant_id: str,
+        txn_ref: str,
+        match_result: str,
+        category: str = None,
+        extracted_data: dict = None,
+        action: str = "REVIEW",
+        reason: str = "",
+        source: str = "BATCH",
+        raw_evidence: dict = None,
     ):
         conn = get_db()
         with conn:
             conn.execute(
                 """
                 INSERT INTO transactions
-                    (timestamp, txn_ref, source,
+                    (merchant_id, timestamp, txn_ref, source,
                      m1_match_result, m2_category, m3_extracted,
                      m4_action, m4_reason, raw_evidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    merchant_id,
                     datetime.utcnow().isoformat(),
                     txn_ref,
                     source,
@@ -40,16 +42,16 @@ class AuditLogger:
             )
         conn.close()
 
-    def is_logged(self, txn_ref: str) -> bool:
+    def is_logged(self, merchant_id: str, txn_ref: str) -> bool:
         """Return True if a transaction with this txn_ref already exists in the DB."""
         conn = get_db()
         row = conn.execute(
-            "SELECT 1 FROM transactions WHERE txn_ref = ? LIMIT 1", (txn_ref,)
+            "SELECT 1 FROM transactions WHERE merchant_id = ? AND txn_ref = ? LIMIT 1", (merchant_id, txn_ref)
         ).fetchone()
         conn.close()
         return row is not None
 
 
 # Global instance for easy importing
-logger = AuditLogger()
 
+logger = AuditLogger()

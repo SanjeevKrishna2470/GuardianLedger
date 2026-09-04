@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { CreditCard, CheckCircle, XCircle, Loader } from 'lucide-react';
-import { API_BASE } from '../config';
+import { API_BASE, fetchAuth } from '../config';
 
 function LiveCheckout() {
   const [amount, setAmount] = useState(500);
@@ -15,7 +15,7 @@ function LiveCheckout() {
 
     try {
       // Step 1: Create an order via our backend
-      const orderRes = await fetch(`${API_BASE}/api/orders`, {
+      const orderRes = await fetchAuth(`${API_BASE}/api/orders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount: amount * 100, currency }), // Razorpay expects paise
@@ -49,7 +49,7 @@ function LiveCheckout() {
         handler: async function (response) {
           setStatus('loading');
           try {
-            const verifyRes = await fetch(`${API_BASE}/api/verify-payment`, {
+            const verifyRes = await fetchAuth(`${API_BASE}/api/verify-payment`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -127,7 +127,7 @@ function LiveCheckout() {
         <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div>
             <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
-              Amount (₹)
+              Amount (â‚¹)
             </label>
             <input
               type="number"
@@ -156,8 +156,8 @@ function LiveCheckout() {
                 fontSize: '13px',
               }}
             >
-              <option value="INR">INR — Indian Rupee</option>
-              <option value="USD">USD — US Dollar</option>
+              <option value="INR">INR â€” Indian Rupee</option>
+              <option value="USD">USD â€” US Dollar</option>
             </select>
           </div>
 
@@ -170,10 +170,10 @@ function LiveCheckout() {
             {status === 'loading' ? (
               <>
                 <Loader size={14} style={{ marginRight: '6px', animation: 'spin 1s linear infinite' }} />
-                Creating order…
+                Creating orderâ€¦
               </>
             ) : (
-              <>Pay ₹{amount} with Razorpay</>
+              <>Pay â‚¹{amount} with Razorpay</>
             )}
           </button>
         </div>
@@ -233,3 +233,4 @@ function LiveCheckout() {
 }
 
 export default LiveCheckout;
+

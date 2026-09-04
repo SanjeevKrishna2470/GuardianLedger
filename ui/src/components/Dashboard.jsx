@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { TrendingUp, AlertTriangle, ShieldAlert, Zap } from 'lucide-react';
-import { API_BASE } from '../config';
+import { API_BASE, fetchAuth } from '../config';
 
 const Dashboard = () => {
   const [data, setData] = useState(null);
@@ -9,7 +9,7 @@ const Dashboard = () => {
 
   const fetchData = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/dashboard`);
+      const res = await fetchAuth(`${API_BASE}/api/dashboard`);
       if (res.ok) {
         const json = await res.json();
         if (!json.error) {
@@ -34,7 +34,7 @@ const Dashboard = () => {
   const handleRunPipeline = async () => {
     setRunningPipeline(true);
     try {
-      const res = await fetch(`${API_BASE}/api/run-pipeline`, { method: 'POST' });
+      const res = await fetchAuth(`${API_BASE}/api/run-pipeline`, { method: 'POST' });
       if (res.ok) {
         const json = await res.json();
         setData(json);
@@ -78,7 +78,7 @@ const Dashboard = () => {
           <h1>Reconciliation Dashboard</h1>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span className="text-muted" style={{ fontSize: '12px' }}>
-              Last updated: {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · {dateStr}
+              Last updated: {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} Â· {dateStr}
             </span>
             <button
               onClick={handleRunPipeline}
@@ -86,7 +86,7 @@ const Dashboard = () => {
               className="btn btn-brand btn-sm"
               style={{ padding: '6px 14px', fontSize: '13px' }}
             >
-              {runningPipeline ? 'Running Pipeline...' : '▶ Run Pipeline'}
+              {runningPipeline ? 'Running Pipeline...' : 'â–¶ Run Pipeline'}
             </button>
           </div>
         </div>
@@ -144,3 +144,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+

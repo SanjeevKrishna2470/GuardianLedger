@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Search, Inbox } from 'lucide-react';
-import { API_BASE } from '../config';
+import { API_BASE, fetchAuth } from '../config';
 
 const Transactions = () => {
   const [transactions, setTransactions] = useState([]);
@@ -10,7 +10,7 @@ const Transactions = () => {
   useEffect(() => {
     const fetchTransactions = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/transactions`);
+        const res = await fetchAuth(`${API_BASE}/api/transactions`);
         if (res.ok) {
           setTransactions(await res.json());
         } else {
@@ -41,11 +41,11 @@ const Transactions = () => {
   const getSourceBadge = (source) => {
     switch (source) {
       case 'LIVE_WEBHOOK':
-        return <span className="status-badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>⚡ Live Webhook</span>;
+        return <span className="status-badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>âš¡ Live Webhook</span>;
       case 'SIMULATION':
-        return <span className="status-badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)' }}>🧪 Simulation</span>;
+        return <span className="status-badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)' }}>ðŸ§ª Simulation</span>;
       default:
-        return <span className="status-badge" style={{ background: 'rgba(107, 114, 128, 0.15)', color: '#9ca3af', border: '1px solid rgba(107, 114, 128, 0.3)' }}>📊 Batch Pipeline</span>;
+        return <span className="status-badge" style={{ background: 'rgba(107, 114, 128, 0.15)', color: '#9ca3af', border: '1px solid rgba(107, 114, 128, 0.3)' }}>ðŸ“Š Batch Pipeline</span>;
     }
   };
 
@@ -114,7 +114,7 @@ const Transactions = () => {
           <input
             className="filter-input"
             type="text"
-            placeholder="Search by reference, source, status, or category…"
+            placeholder="Search by reference, source, status, or categoryâ€¦"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -166,10 +166,10 @@ const Transactions = () => {
                   >
                     <td><code>{txn.txn_ref}</code></td>
                     <td>{getSourceBadge(txn.source)}</td>
-                    <td><span className={getBadgeClass(txn.match_result || txn.m1_match_result || txn.m1_match_status)}>{txn.match_result || txn.m1_match_result || txn.m1_match_status || '—'}</span></td>
-                    <td>{txn.category || txn.m2_category || '—'}</td>
-                    <td><span className={getBadgeClass(txn.action || txn.m4_action)}>{txn.action || txn.m4_action || '—'}</span></td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{txn.reason || txn.m4_reason || '—'}</td>
+                    <td><span className={getBadgeClass(txn.match_result || txn.m1_match_result || txn.m1_match_status)}>{txn.match_result || txn.m1_match_result || txn.m1_match_status || 'â€”'}</span></td>
+                    <td>{txn.category || txn.m2_category || 'â€”'}</td>
+                    <td><span className={getBadgeClass(txn.action || txn.m4_action)}>{txn.action || txn.m4_action || 'â€”'}</span></td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{txn.reason || txn.m4_reason || 'â€”'}</td>
                   </tr>
                   {expandedRow === txn.txn_ref && (
                     <tr style={{ background: 'var(--bg-surface-secondary)' }}>
@@ -205,15 +205,15 @@ const Transactions = () => {
           {/* Pagination controls */}
           <div style={paginationStyle}>
             <span>
-              Showing <strong>{filtered.length === 0 ? 0 : pageStart + 1}–{pageEnd}</strong> of <strong>{filtered.length}</strong>
+              Showing <strong>{filtered.length === 0 ? 0 : pageStart + 1}â€“{pageEnd}</strong> of <strong>{filtered.length}</strong>
               {search && ` (filtered from ${transactions.length} total)`}
             </span>
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              <button style={btnStyle(safePage === 1)} disabled={safePage === 1} onClick={() => setPage(1)}>«</button>
-              <button style={btnStyle(safePage === 1)} disabled={safePage === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>‹ Prev</button>
+              <button style={btnStyle(safePage === 1)} disabled={safePage === 1} onClick={() => setPage(1)}>Â«</button>
+              <button style={btnStyle(safePage === 1)} disabled={safePage === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>â€¹ Prev</button>
               <span style={{ padding: '4px 8px' }}>Page {safePage} of {totalPages}</span>
-              <button style={btnStyle(safePage === totalPages)} disabled={safePage === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next ›</button>
-              <button style={btnStyle(safePage === totalPages)} disabled={safePage === totalPages} onClick={() => setPage(totalPages)}>»</button>
+              <button style={btnStyle(safePage === totalPages)} disabled={safePage === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next â€º</button>
+              <button style={btnStyle(safePage === totalPages)} disabled={safePage === totalPages} onClick={() => setPage(totalPages)}>Â»</button>
             </div>
           </div>
         </div>
@@ -223,3 +223,4 @@ const Transactions = () => {
 };
 
 export default Transactions;
+

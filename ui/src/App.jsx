@@ -1,21 +1,25 @@
-import { BrowserRouter, Routes, Route, NavLink, useLocation } from 'react-router-dom'
-import { LayoutDashboard, ListChecks, Shield, AlertTriangle, Search, Bell, CreditCard } from 'lucide-react'
-import Dashboard from './components/Dashboard'
-import ReviewQueue from './components/ReviewQueue'
-import Transactions from './components/Transactions'
-import LiveCheckout from './components/LiveCheckout'
-import './App.css'
+﻿import { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, NavLink, useLocation } from 'react-router-dom';
+import { LayoutDashboard, ListChecks, Shield, AlertTriangle, Search, Bell, CreditCard, Settings, LogOut } from 'lucide-react';
+import Dashboard from './components/Dashboard';
+import ReviewQueue from './components/ReviewQueue';
+import Transactions from './components/Transactions';
+import LiveCheckout from './components/LiveCheckout';
+import Auth from './components/Auth';
+import Onboarding from './components/Onboarding';
+import './App.css';
 
 const pageTitles = {
   '/': 'Dashboard',
   '/queue': 'Review Queue',
   '/transactions': 'Transactions',
   '/checkout': 'Live Checkout',
-}
+  '/settings': 'Settings & Integration'
+};
 
 function TopBar() {
-  const location = useLocation()
-  const title = pageTitles[location.pathname] || 'Dashboard'
+  const location = useLocation();
+  const title = pageTitles[location.pathname] || 'Dashboard';
 
   return (
     <div className="top-bar">
@@ -36,10 +40,21 @@ function TopBar() {
         <div className="avatar" title="User">GL</div>
       </div>
     </div>
-  )
+  );
 }
 
 function App() {
+  const [token, setToken] = useState(localStorage.getItem('gl_token'));
+
+  if (!token) {
+    return <Auth onLogin={(t) => { localStorage.setItem('gl_token', t); setToken(t); }} />;
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('gl_token');
+    setToken(null);
+  };
+
   return (
     <BrowserRouter>
       <div className="app-layout">
@@ -65,11 +80,21 @@ function App() {
               <CreditCard size={18} />
               <span>Live Checkout</span>
             </NavLink>
+            <NavLink to="/settings" className={({isActive}) => `nav-link ${isActive ? 'active' : ''}`}>
+              <Settings size={18} />
+              <span>Settings</span>
+            </NavLink>
           </nav>
           <div className="sidebar-footer">
-            <span className="status-dot"></span>
-            <span>System Online</span>
-            <span style={{ marginLeft: 'auto', fontSize: '11px', opacity: 0.5 }}>v1.0</span>
+            <button onClick={handleLogout} className="nav-link" style={{ background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', padding: '8px 12px', color: 'var(--text-secondary)' }}>
+              <LogOut size={16} style={{ marginRight: '8px', verticalAlign: '-3px' }} />
+              <span>Log Out</span>
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', marginTop: '12px' }}>
+              <span className="status-dot"></span>
+              <span>System Online</span>
+              <span style={{ marginLeft: 'auto', fontSize: '11px', opacity: 0.5 }}>v2.0</span>
+            </div>
           </div>
         </aside>
         <main className="main-content">
@@ -80,11 +105,12 @@ function App() {
               <Route path="/queue" element={<ReviewQueue />} />
               <Route path="/transactions" element={<Transactions />} />
               <Route path="/checkout" element={<LiveCheckout />} />
+              <Route path="/settings" element={<Onboarding token={token} />} />
             </Routes>
           </div>
         </main>
       </div>
     </BrowserRouter>
-  )
+  );
 }
-export default App
+export default App;

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { CheckCircle, Check, X } from 'lucide-react';
-import { API_BASE } from '../config';
+import { API_BASE, fetchAuth } from '../config';
 
 const ReviewQueue = () => {
   const [queue, setQueue] = useState([]);
@@ -10,7 +10,7 @@ const ReviewQueue = () => {
   useEffect(() => {
     const fetchQueue = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/queue`);
+        const res = await fetchAuth(`${API_BASE}/api/queue`);
         if (res.ok) {
           setQueue(await res.json());
         } else {
@@ -28,7 +28,7 @@ const ReviewQueue = () => {
 
   const handleAction = async (txn_ref, decision) => {
     try {
-      await fetch(`${API_BASE}/api/action`, {
+      await fetchAuth(`${API_BASE}/api/action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ txn_ref, decision })
@@ -96,8 +96,8 @@ const ReviewQueue = () => {
                 <tr key={item.txn_ref}>
                   <td>{item.txn_ref}</td>
                   <td><span className={getStatusClass(item.status || item.m4_action)}>{item.status || item.m4_action}</span></td>
-                  <td>{item.category || item.m2_category || '—'}</td>
-                  <td style={{ color: 'var(--text-secondary)', maxWidth: '300px' }}>{item.m4_reason || '—'}</td>
+                  <td>{item.category || item.m2_category || 'â€”'}</td>
+                  <td style={{ color: 'var(--text-secondary)', maxWidth: '300px' }}>{item.m4_reason || 'â€”'}</td>
                   <td>
                     <div className="action-group">
                       <button onClick={() => handleAction(item.txn_ref, 'approve')} className="btn btn-success btn-sm">Approve</button>
@@ -115,3 +115,4 @@ const ReviewQueue = () => {
 };
 
 export default ReviewQueue;
+
