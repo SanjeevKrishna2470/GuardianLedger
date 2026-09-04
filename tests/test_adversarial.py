@@ -291,5 +291,28 @@ class TestLegitimatePayload:
         )
 
 
+class TestTimestampSkew:
+    def test_expired_timestamp(self, monkeypatch):
+        merchant_id = _setup_merchant_and_keys(monkeypatch)
+        import time
+        payload = dict(SAMPLE_PAYMENT_PAYLOAD)
+        payload["created_at"] = int(time.time()) - 600 # 10 mins ago
+        
+        payload_bytes = json.dumps(payload).encode()
+        valid_sig = _sign(payload_bytes, WEBHOOK_SECRET)
+        
+        response = client.post(
+            f"/api/webhooks/razorpay/{merchant_id}",
+            content=payload_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "X-Razorpay-Signature": valid_sig,
+                "X-Razorpay-Event-Id": "evt_skew_test",
+            },
+        )
+        assert response.status_code == 400
+        assert "timestamp expired" in response.json()["detail"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

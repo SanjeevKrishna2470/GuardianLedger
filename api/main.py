@@ -1,10 +1,10 @@
-﻿import json
+import json
 import os
 import uuid
 import datetime
 import sys
 
-from fastapi import FastAPI, Request, HTTPException, Header, Depends
+from fastapi import FastAPI, Request, HTTPException, Header, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import razorpay
@@ -244,75 +244,7 @@ def verify_payment(req: VerifyPaymentRequest, current_user: dict = Depends(get_c
         )
     return {"status": "ok", "message": "Payment verified and recorded", "txn_ref": req.payment_id}
 
-@app.post("/api/webhooks/razorpay/{merchant_id}")
-async def razorpay_webhook(merchant_id: str, request: Request, x_razorpay_signature: str = Header(None)):
-    raw_body = await request.body()
-    
-    conn = get_db()
-    row = conn.execute("SELECT razorpay_webhook_secret_enc FROM merchants WHERE id = ?", (merchant_id,)).fetchone()
-    
-    if not row or not row["razorpay_webhook_secret_enc"]:
-        conn.close()
-        raise HTTPException(status_code=500, detail="Webhook secret not configured for this merchant.")
-        
-    webhook_secret = decrypt_value(row["razorpay_webhook_secret_enc"])
-
-    if not x_razorpay_signature:
-        conn.close()
-        raise HTTPException(status_code=400, detail="Missing signature")
-
-    # To verify webhook signature we still need a razorpay client, but utility methods only need the secret
-    client = razorpay.Client(auth=("mock", "mock")) 
-    
-    try:
-        client.utility.verify_webhook_signature(
-            raw_body.decode("utf-8"), x_razorpay_signature, webhook_secret
-        )
-    except Exception as e:
-        conn.close()
-        logger.log_transaction(
-            merchant_id=merchant_id,
-            txn_ref="UNKNOWN",
-            match_result="FAILED",
-            category="SECURITY_EXCEPTION",
-            extracted_data={"error": "Signature mismatch"},
-            action=Action.QUARANTINE,
-            reason="Webhook signature verification failed",
-            source="LIVE_WEBHOOK",
-            raw_evidence={"error": str(e), "event": "signature_mismatch"},
-        )
-        raise HTTPException(status_code=400, detail="Invalid signature")
-
-    payload = json.loads(raw_body)
-    event_id = request.headers.get("x-razorpay-event-id", "unknown")
-
-    already_processed = conn.execute(
-        "SELECT 1 FROM processed_events WHERE merchant_id = ? AND event_id = ? LIMIT 1", (merchant_id, event_id)
-    ).fetchone()
-
-    if already_processed:
-        conn.close()
-        logger.log_transaction(
-            merchant_id=merchant_id,
-            txn_ref=payload.get("payload", {}).get("payment", {}).get("entity", {}).get("id", "UNKNOWN"),
-            match_result="FAILED",
-            category="DUPLICATE",
-            extracted_data={"event_id": event_id},
-            action=Action.EXCEPTION,
-            reason=f"Duplicate webhook event: {event_id}",
-            source="LIVE_WEBHOOK",
-            raw_evidence={"event_id": event_id, "event": "duplicate_webhook"},
-        )
-        return {"status": "ignored", "reason": "duplicate"}
-
-    # Mark event as processed
-    with conn:
-        conn.execute(
-            "INSERT INTO processed_events (merchant_id, event_id, timestamp) VALUES (?, ?, ?)",
-            (merchant_id, event_id, datetime.datetime.utcnow().isoformat()),
-        )
-    conn.close()
-
+def process_webhook_event(merchant_id: str, payload: dict):
     event_type = payload.get("event")
 
     if event_type in ("payment.captured", "payment.authorized"):
@@ -374,7 +306,77 @@ async def razorpay_webhook(merchant_id: str, request: Request, x_razorpay_signat
             },
         )
 
-    return {"status": "ok"}
+
+@app.post("/api/webhooks/razorpay/{merchant_id}")
+async def razorpay_webhook(merchant_id: str, request: Request, background_tasks: BackgroundTasks, x_razorpay_signature: str = Header(None)):
+    raw_body = await request.body()
+    
+    conn = get_db()
+    row = conn.execute("SELECT razorpay_webhook_secret_enc FROM merchants WHERE id = ?", (merchant_id,)).fetchone()
+    
+    if not row or not row["razorpay_webhook_secret_enc"]:
+        conn.close()
+        raise HTTPException(status_code=500, detail="Webhook secret not configured for this merchant.")
+        
+    webhook_secret = decrypt_value(row["razorpay_webhook_secret_enc"])
+
+    if not x_razorpay_signature:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Missing signature")
+
+    client = razorpay.Client(auth=("mock", "mock")) 
+    
+    try:
+        client.utility.verify_webhook_signature(
+            raw_body.decode("utf-8"), x_razorpay_signature, webhook_secret
+        )
+    except Exception as e:
+        conn.close()
+        logger.log_transaction(
+            merchant_id=merchant_id,
+            txn_ref="UNKNOWN",
+            match_result="FAILED",
+            category="SECURITY_EXCEPTION",
+            extracted_data={"error": "Signature mismatch"},
+            action=Action.QUARANTINE,
+            reason="Webhook signature verification failed",
+            source="LIVE_WEBHOOK",
+            raw_evidence={"error": str(e), "event": "signature_mismatch"},
+        )
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    payload = json.loads(raw_body)
+    
+    # Block 2: Timestamp Skew Check (prevent replay attacks)
+    created_at = payload.get("created_at")
+    if created_at:
+        skew = datetime.datetime.utcnow().timestamp() - created_at
+        if skew > 300 or skew < -300:  # 5 minutes
+            conn.close()
+            raise HTTPException(status_code=400, detail="Payload timestamp expired (skew > 5 mins)")
+
+    event_id = request.headers.get("x-razorpay-event-id", "unknown")
+
+    already_processed = conn.execute(
+        "SELECT 1 FROM processed_events WHERE merchant_id = ? AND event_id = ? LIMIT 1", (merchant_id, event_id)
+    ).fetchone()
+
+    if already_processed:
+        conn.close()
+        return {"status": "ignored", "reason": "duplicate"}
+
+    # Mark event as processed (synchronous dedup lock)
+    with conn:
+        conn.execute(
+            "INSERT INTO processed_events (merchant_id, event_id, timestamp) VALUES (?, ?, ?)",
+            (merchant_id, event_id, datetime.datetime.utcnow().isoformat()),
+        )
+    conn.close()
+
+    # Block 2: Async Webhook Processing
+    background_tasks.add_task(process_webhook_event, merchant_id, payload)
+    
+    return {"status": "ok", "message": "processing"}
 
 if __name__ == "__main__":
     import uvicorn
