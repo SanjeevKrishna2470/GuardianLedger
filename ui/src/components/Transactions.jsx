@@ -66,14 +66,43 @@ const Transactions = () => {
   });
 
   const [expandedRow, setExpandedRow] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+
+  // Reset to page 1 whenever search or pageSize changes
+  useEffect(() => { setPage(1); }, [search, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageStart = (safePage - 1) * pageSize;
+  const pageEnd = Math.min(pageStart + pageSize, filtered.length);
+  const paginated = filtered.slice(pageStart, pageEnd);
 
   const toggleRow = (txn_ref) => {
-    if (expandedRow === txn_ref) {
-      setExpandedRow(null);
-    } else {
-      setExpandedRow(txn_ref);
-    }
+    setExpandedRow(expandedRow === txn_ref ? null : txn_ref);
   };
+
+  const paginationStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '12px 16px',
+    borderTop: '1px solid var(--border-default)',
+    fontSize: '13px',
+    color: 'var(--text-secondary)',
+    flexWrap: 'wrap',
+    gap: '8px',
+  };
+
+  const btnStyle = (disabled) => ({
+    padding: '4px 10px',
+    borderRadius: 'var(--radius-sm)',
+    border: '1px solid var(--border-default)',
+    background: disabled ? 'transparent' : 'var(--bg-surface)',
+    color: disabled ? 'var(--text-tertiary)' : 'var(--text-primary)',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: '13px',
+  });
 
   return (
     <div>
@@ -92,6 +121,17 @@ const Transactions = () => {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+          <label htmlFor="page-size">Rows:</label>
+          <select
+            id="page-size"
+            value={pageSize}
+            onChange={e => setPageSize(Number(e.target.value))}
+            style={{ padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-default)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '13px' }}
+          >
+            {[25, 50, 100, 250].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
         </div>
       </div>
 
@@ -121,7 +161,7 @@ const Transactions = () => {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((txn) => (
+              {paginated.map((txn) => (
                 <React.Fragment key={txn.txn_ref}>
                   <tr 
                     onClick={() => toggleRow(txn.txn_ref)} 
@@ -164,6 +204,21 @@ const Transactions = () => {
               ))}
             </tbody>
           </table>
+
+          {/* Pagination controls */}
+          <div style={paginationStyle}>
+            <span>
+              Showing <strong>{filtered.length === 0 ? 0 : pageStart + 1}–{pageEnd}</strong> of <strong>{filtered.length}</strong>
+              {search && ` (filtered from ${transactions.length} total)`}
+            </span>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <button style={btnStyle(safePage === 1)} disabled={safePage === 1} onClick={() => setPage(1)}>«</button>
+              <button style={btnStyle(safePage === 1)} disabled={safePage === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>‹ Prev</button>
+              <span style={{ padding: '4px 8px' }}>Page {safePage} of {totalPages}</span>
+              <button style={btnStyle(safePage === totalPages)} disabled={safePage === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next ›</button>
+              <button style={btnStyle(safePage === totalPages)} disabled={safePage === totalPages} onClick={() => setPage(totalPages)}>»</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
