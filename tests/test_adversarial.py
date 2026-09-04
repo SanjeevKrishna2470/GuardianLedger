@@ -76,9 +76,11 @@ def _sign(payload_bytes: bytes, secret: str) -> str:
 
 def _clean_dedup_store():
     """Remove the dedup store so tests start fresh."""
-    dedup_path = os.path.join(DATA_DIR, "processed_event_ids.jsonl")
-    if os.path.exists(dedup_path):
-        os.remove(dedup_path)
+    from report.db import get_db
+    conn = get_db()
+    with conn:
+        conn.execute("DELETE FROM processed_events")
+    conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -161,10 +163,14 @@ class TestReplayedEventId:
         event_id = "evt_dedup_test_001"
 
         # Pre-seed the dedup store with this event ID
-        dedup_path = os.path.join(DATA_DIR, "processed_event_ids.jsonl")
-        os.makedirs(os.path.dirname(dedup_path), exist_ok=True)
-        with open(dedup_path, "w") as f:
-            f.write(json.dumps({"event_id": event_id, "timestamp": "2026-01-01T00:00:00"}) + "\n")
+        from report.db import get_db
+        conn = get_db()
+        with conn:
+            conn.execute(
+                "INSERT INTO processed_events (event_id, timestamp) VALUES (?, ?)",
+                (event_id, "2026-01-01T00:00:00")
+            )
+        conn.close()
 
         payload_bytes = json.dumps(SAMPLE_PAYMENT_PAYLOAD).encode()
         valid_sig = _sign(payload_bytes, WEBHOOK_SECRET)

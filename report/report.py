@@ -2,37 +2,30 @@ import json
 import os
 import time
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from report.db import get_db, _PROJECT_ROOT
 
-def generate_report(log_file=None, start_time=None, end_time=None):
-    if log_file is None:
-        log_file = os.path.join(_PROJECT_ROOT, "data", "audit_log.jsonl")
+def generate_report(start_time=None, end_time=None):
+    conn = get_db()
+    rows = conn.execute("SELECT m4_action, m2_category FROM transactions").fetchall()
+    conn.close()
 
-    total = 0
+    total = len(rows)
     matched = 0
     exceptions = {}
     quarantined = 0
-    false_quarantine = 0 # In a real scenario, this would be computed against truth labels
-    
-    with open(log_file, 'r') as f:
-        for line in f:
-            if not line.strip():
-                continue
-            entry = json.loads(line)
-            total += 1
-            
-            action = entry.get("m4_action")
-            cat = entry.get("m2_category")
-            
-            if action == "MATCH" or action == "POST":
-                matched += 1
-            elif action == "QUARANTINE":
-                quarantined += 1
-                # If it's a known clean txn that got quarantined
-                if "true_category" in entry and entry["true_category"] == "CLEAN":
-                    false_quarantine += 1
-            elif action == "EXCEPTION" or cat:
-                exceptions[cat] = exceptions.get(cat, 0) + 1
+    false_quarantine = 0
+
+    for row in rows:
+        action = row["m4_action"]
+        cat = row["m2_category"]
+
+        if action == "MATCH" or action == "POST":
+            matched += 1
+        elif action == "QUARANTINE":
+            quarantined += 1
+        elif action == "EXCEPTION" or cat:
+            exceptions[cat] = exceptions.get(cat, 0) + 1
+
 
     throughput = 0
     if start_time and end_time:

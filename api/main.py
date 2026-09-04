@@ -1,8 +1,21 @@
 import json
 import os
+import sqlite3
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+from report.db import get_db, _PROJECT_ROOT
+
+def _row_to_dict(row) -> dict:
+    d = dict(row)
+    for field in ("m3_extracted", "raw_evidence"):
+        if d.get(field) and isinstance(d[field], str):
+            try:
+                d[field] = json.loads(d[field])
+            except Exception:
+                pass
+    return d
 
 app = FastAPI(title="Guardian Ledger API")
 
@@ -44,34 +57,19 @@ def get_dashboard():
 
 @app.get("/api/queue")
 def get_review_queue():
-    log_path = os.path.join(DATA_DIR, "audit_log.jsonl")
-    if not os.path.exists(log_path):
-        return []
-    
-    queue = []
-    with open(log_path) as f:
-        for line in f:
-            if not line.strip():
-                continue
-            entry = json.loads(line)
-            action = entry.get("m4_action", "")
-            if action in ("REVIEW", "EXCEPTION", "QUARANTINE"):
-                queue.append(entry)
-    return queue
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM transactions WHERE m4_action IN ('REVIEW','EXCEPTION','QUARANTINE') ORDER BY id DESC"
+    ).fetchall()
+    conn.close()
+    return [_row_to_dict(r) for r in rows]
 
 @app.get("/api/transactions")
 def get_all_transactions():
-    log_path = os.path.join(DATA_DIR, "audit_log.jsonl")
-    if not os.path.exists(log_path):
-        return []
-    
-    txns = []
-    with open(log_path) as f:
-        for line in f:
-            if not line.strip():
-                continue
-            txns.append(json.loads(line))
-    return txns
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM transactions ORDER BY id DESC").fetchall()
+    conn.close()
+    return [_row_to_dict(r) for r in rows]
 
 class SimulateRequest(BaseModel):
     type: str
@@ -170,16 +168,13 @@ def simulate_transaction(req: SimulateRequest):
 
 @app.post("/api/action")
 def post_action(req: ActionRequest):
-    # In a production system, this would write to a database.
-    # For the MVP demo, we append to a decisions log.
-    decisions_path = os.path.join(DATA_DIR, "decisions.jsonl")
-    entry = {
-        "txn_ref": req.txn_ref,
-        "decision": req.decision,
-        "reviewer_note": req.reviewer_note
-    }
-    with open(decisions_path, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    conn = get_db()
+    with conn:
+        conn.execute(
+            "INSERT INTO decisions (timestamp, txn_ref, decision, reviewer_note) VALUES (?, ?, ?, ?)",
+            (datetime.datetime.utcnow().isoformat(), req.txn_ref, req.decision, req.reviewer_note),
+        )
+    conn.close()
     return {"status": "ok", "decision": req.decision, "txn_ref": req.txn_ref}
 
 # --- Razorpay Integration ---
@@ -246,22 +241,7 @@ def verify_payment(req: VerifyPaymentRequest):
         )
         raise HTTPException(status_code=400, detail="Invalid payment signature")
 
-    # Check if transaction reference is already in audit_log.jsonl to avoid duplicates
-    log_path = os.path.join(DATA_DIR, "audit_log.jsonl")
-    already_logged = False
-    if os.path.exists(log_path):
-        with open(log_path, "r") as f:
-            for line in f:
-                if line.strip():
-                    try:
-                        entry = json.loads(line)
-                        if entry.get("txn_ref") == req.payment_id:
-                            already_logged = True
-                            break
-                    except Exception:
-                        pass
-
-    if not already_logged:
+    if not logger.is_logged(req.payment_id):
         logger.log_transaction(
             txn_ref=req.payment_id,
             match_result="MATCHED",
@@ -319,28 +299,34 @@ async def razorpay_webhook(request: Request, x_razorpay_signature: str = Header(
     payload = json.loads(raw_body)
     event_id = request.headers.get("x-razorpay-event-id", "unknown")
     
-    # Simple JSONL deduplication store
-    dedup_path = os.path.join(DATA_DIR, "processed_event_ids.jsonl")
-    if os.path.exists(dedup_path):
-        with open(dedup_path, "r") as f:
-            processed_ids = [json.loads(line.strip()).get("event_id") for line in f if line.strip()]
-        if event_id in processed_ids:
-            print(f"DUPLICATE EXCEPTION: Event ID {event_id} already processed.")
-            logger.log_transaction(
-                txn_ref=payload.get("payload", {}).get("payment", {}).get("entity", {}).get("id", "UNKNOWN"),
-                match_result="FAILED",
-                category="DUPLICATE",
-                extracted_data={"event_id": event_id},
-                action=Action.EXCEPTION,
-                reason=f"Duplicate webhook event: {event_id}",
-                source="LIVE_WEBHOOK",
-                raw_evidence={"event_id": event_id, "event": "duplicate_webhook"}
-            )
-            return {"status": "ignored", "reason": "duplicate"}
+    # Dedup via processed_events table
+    conn = get_db()
+    already_processed = conn.execute(
+        "SELECT 1 FROM processed_events WHERE event_id = ? LIMIT 1", (event_id,)
+    ).fetchone()
 
-    # Save to dedup store
-    with open(dedup_path, "a") as f:
-        f.write(json.dumps({"event_id": event_id, "timestamp": str(datetime.datetime.now())}) + "\n")
+    if already_processed:
+        conn.close()
+        print(f"DUPLICATE EXCEPTION: Event ID {event_id} already processed.")
+        logger.log_transaction(
+            txn_ref=payload.get("payload", {}).get("payment", {}).get("entity", {}).get("id", "UNKNOWN"),
+            match_result="FAILED",
+            category="DUPLICATE",
+            extracted_data={"event_id": event_id},
+            action=Action.EXCEPTION,
+            reason=f"Duplicate webhook event: {event_id}",
+            source="LIVE_WEBHOOK",
+            raw_evidence={"event_id": event_id, "event": "duplicate_webhook"}
+        )
+        return {"status": "ignored", "reason": "duplicate"}
+
+    # Mark event as processed
+    with conn:
+        conn.execute(
+            "INSERT INTO processed_events (event_id, timestamp) VALUES (?, ?)",
+            (event_id, datetime.datetime.utcnow().isoformat()),
+        )
+    conn.close()
 
     event_type = payload.get("event")
     print(f"Processing genuine webhook event: {event_type} - {event_id}")
@@ -350,22 +336,7 @@ async def razorpay_webhook(request: Request, x_razorpay_signature: str = Header(
         payment_entity = payload["payload"]["payment"]["entity"]
         txn_ref = payment_entity["id"]
         
-        # Dedup: skip if this payment was already logged (e.g. via verify-payment endpoint)
-        log_path = os.path.join(DATA_DIR, "audit_log.jsonl")
-        already_logged = False
-        if os.path.exists(log_path):
-            with open(log_path, "r") as f:
-                for line in f:
-                    if line.strip():
-                        try:
-                            entry = json.loads(line)
-                            if entry.get("txn_ref") == txn_ref:
-                                already_logged = True
-                                break
-                        except Exception:
-                            pass
-        
-        if not already_logged:
+        if not logger.is_logged(txn_ref):
             logger.log_transaction(
                 txn_ref=txn_ref,
                 match_result="MATCHED",

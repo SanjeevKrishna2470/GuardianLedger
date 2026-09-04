@@ -1,38 +1,55 @@
 import json
 from datetime import datetime
-import os
 
-# Anchor the project root to the directory two levels above this file:
-# report/audit_log.py  ->  report/  ->  <project_root>/
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from report.db import get_db
+
 
 class AuditLogger:
-    def __init__(self, log_file=None):
-        if log_file is None:
-            # Always resolve relative to the project root, not the CWD.
-            log_file = os.path.join(_PROJECT_ROOT, "data", "audit_log.jsonl")
-        self.log_file = log_file
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(self.log_file), exist_ok=True)
-        # Touch file if it doesn't exist
-        if not os.path.exists(self.log_file):
-            with open(self.log_file, 'w') as f:
-                pass
+    def log_transaction(
+        self,
+        txn_ref,
+        match_result,
+        category,
+        extracted_data,
+        action,
+        reason,
+        source="BATCH_PIPELINE",
+        raw_evidence=None,
+    ):
+        conn = get_db()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO transactions
+                    (timestamp, txn_ref, source,
+                     m1_match_result, m2_category, m3_extracted,
+                     m4_action, m4_reason, raw_evidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.utcnow().isoformat(),
+                    txn_ref,
+                    source,
+                    match_result,
+                    category,
+                    json.dumps(extracted_data) if extracted_data is not None else None,
+                    action.name if hasattr(action, "name") else str(action),
+                    reason,
+                    json.dumps(raw_evidence) if raw_evidence is not None else None,
+                ),
+            )
+        conn.close()
 
-    def log_transaction(self, txn_ref, match_result, category, extracted_data, action, reason, source="BATCH_PIPELINE", raw_evidence=None):
-        entry = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "txn_ref": txn_ref,
-            "source": source,
-            "m1_match_result": match_result,
-            "m2_category": category,
-            "m3_extracted": extracted_data,
-            "m4_action": action.name if hasattr(action, 'name') else str(action),
-            "m4_reason": reason,
-            "raw_evidence": raw_evidence or {}
-        }
-        with open(self.log_file, 'a') as f:
-            f.write(json.dumps(entry) + '\n')
+    def is_logged(self, txn_ref: str) -> bool:
+        """Return True if a transaction with this txn_ref already exists in the DB."""
+        conn = get_db()
+        row = conn.execute(
+            "SELECT 1 FROM transactions WHERE txn_ref = ? LIMIT 1", (txn_ref,)
+        ).fetchone()
+        conn.close()
+        return row is not None
+
 
 # Global instance for easy importing
 logger = AuditLogger()
+
