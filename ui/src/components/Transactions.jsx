@@ -41,12 +41,24 @@ const Transactions = () => {
     }
   };
 
+  const getSourceBadge = (source) => {
+    switch (source) {
+      case 'LIVE_WEBHOOK':
+        return <span className="status-badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>⚡ Live Webhook</span>;
+      case 'SIMULATION':
+        return <span className="status-badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)' }}>🧪 Simulation</span>;
+      default:
+        return <span className="status-badge" style={{ background: 'rgba(107, 114, 128, 0.15)', color: '#9ca3af', border: '1px solid rgba(107, 114, 128, 0.3)' }}>📊 Batch Pipeline</span>;
+    }
+  };
+
   const filtered = transactions.filter(txn => {
     if (!search) return true;
     const q = search.toLowerCase();
     return (
       (txn.txn_ref || '').toLowerCase().includes(q) ||
-      (txn.match_result || '').toLowerCase().includes(q) ||
+      (txn.source || '').toLowerCase().includes(q) ||
+      (txn.match_result || txn.m1_match_result || txn.m1_match_status || '').toLowerCase().includes(q) ||
       (txn.category || txn.m2_category || '').toLowerCase().includes(q) ||
       (txn.action || txn.m4_action || '').toLowerCase().includes(q) ||
       (txn.reason || txn.m4_reason || '').toLowerCase().includes(q)
@@ -76,7 +88,7 @@ const Transactions = () => {
           <input
             className="filter-input"
             type="text"
-            placeholder="Search by reference, status, or category…"
+            placeholder="Search by reference, source, status, or category…"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -92,7 +104,7 @@ const Transactions = () => {
               <Inbox size={24} />
             </div>
             <h2>{search ? 'No results' : 'No transactions'}</h2>
-            <p>{search ? `No transactions match "${search}"` : 'Run the pipeline to generate transaction data.'}</p>
+            <p>{search ? `No transactions match "${search}"` : 'Run the pipeline or trigger a transaction to see data.'}</p>
           </div>
         </div>
       ) : (
@@ -101,6 +113,7 @@ const Transactions = () => {
             <thead>
               <tr>
                 <th>Reference</th>
+                <th>Source</th>
                 <th>Match Result</th>
                 <th>Category</th>
                 <th>Action</th>
@@ -114,15 +127,16 @@ const Transactions = () => {
                     onClick={() => toggleRow(txn.txn_ref)} 
                     style={{ cursor: 'pointer', background: expandedRow === txn.txn_ref ? 'var(--bg-hover)' : '' }}
                   >
-                    <td>{txn.txn_ref}</td>
-                    <td><span className={getBadgeClass(txn.match_result || txn.m1_match_status)}>{txn.match_result || txn.m1_match_status || '—'}</span></td>
+                    <td><code>{txn.txn_ref}</code></td>
+                    <td>{getSourceBadge(txn.source)}</td>
+                    <td><span className={getBadgeClass(txn.match_result || txn.m1_match_result || txn.m1_match_status)}>{txn.match_result || txn.m1_match_result || txn.m1_match_status || '—'}</span></td>
                     <td>{txn.category || txn.m2_category || '—'}</td>
                     <td><span className={getBadgeClass(txn.action || txn.m4_action)}>{txn.action || txn.m4_action || '—'}</span></td>
                     <td style={{ color: 'var(--text-secondary)' }}>{txn.reason || txn.m4_reason || '—'}</td>
                   </tr>
                   {expandedRow === txn.txn_ref && (
                     <tr style={{ background: 'var(--bg-surface-secondary)' }}>
-                      <td colSpan="5" style={{ padding: '20px' }}>
+                      <td colSpan="6" style={{ padding: '20px' }}>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', fontSize: '12.5px' }}>
                           <div style={{ background: 'var(--bg-surface)', padding: '12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-default)' }}>
                             <h4 style={{ marginBottom: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>GATEWAY RECORD</h4>

@@ -2,7 +2,12 @@ import json
 import os
 import time
 
-def generate_report(log_file="data/audit_log.jsonl", start_time=None, end_time=None):
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def generate_report(log_file=None, start_time=None, end_time=None):
+    if log_file is None:
+        log_file = os.path.join(_PROJECT_ROOT, "data", "audit_log.jsonl")
+
     total = 0
     matched = 0
     exceptions = {}
@@ -44,7 +49,7 @@ def generate_report(log_file="data/audit_log.jsonl", start_time=None, end_time=N
     }
     
     # Write JSON report
-    with open("data/report.json", 'w') as f:
+    with open(os.path.join(_PROJECT_ROOT, "data", "report.json"), 'w') as f:
         json.dump(report_data, f, indent=2)
         
     # Write Markdown summary
@@ -60,7 +65,7 @@ def generate_report(log_file="data/audit_log.jsonl", start_time=None, end_time=N
     for k, v in exceptions.items():
         md += f"- **{k}**: {v}\n"
         
-    with open("data/report.md", 'w') as f:
+    with open(os.path.join(_PROJECT_ROOT, "data", "report.md"), 'w') as f:
         f.write(md)
         
     print(md)

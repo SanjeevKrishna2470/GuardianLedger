@@ -21,6 +21,19 @@ class ActionRequest(BaseModel):
     decision: str  # "approve" or "reject"
     reviewer_note: str = ""
 
+@app.post("/api/run-pipeline")
+def run_pipeline_endpoint():
+    try:
+        from run import main as run_pipeline_main
+        run_pipeline_main()
+        report_path = os.path.join(DATA_DIR, "report.json")
+        if os.path.exists(report_path):
+            with open(report_path) as f:
+                return json.load(f)
+        return {"status": "ok", "message": "Pipeline completed successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/dashboard")
 def get_dashboard():
     report_path = os.path.join(DATA_DIR, "report.json")
@@ -142,7 +155,13 @@ def simulate_transaction(req: SimulateRequest):
         category=category,
         extracted_data=extracted_data,
         action=final_action,
-        reason=reason
+        reason=reason,
+        source="SIMULATION",
+        raw_evidence={
+            "gateway_record": gw_rec,
+            "bank_record": bank_rec,
+            "ledger_record": ledger_rec
+        }
     )
     
     generate_report()
@@ -200,6 +219,71 @@ def create_order(req: OrderRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class VerifyPaymentRequest(BaseModel):
+    payment_id: str
+    order_id: str
+    signature: str
+
+@app.post("/api/verify-payment")
+def verify_payment(req: VerifyPaymentRequest):
+    client = get_razorpay_client()
+    try:
+        client.utility.verify_payment_signature({
+            'razorpay_order_id': req.order_id,
+            'razorpay_payment_id': req.payment_id,
+            'razorpay_signature': req.signature
+        })
+    except Exception as e:
+        logger.log_transaction(
+            txn_ref=req.payment_id,
+            match_result="FAILED",
+            category="SECURITY_EXCEPTION",
+            extracted_data={"order_id": req.order_id, "error": str(e)},
+            action=Action.QUARANTINE,
+            reason="Checkout payment signature verification failed",
+            source="LIVE_CHECKOUT",
+            raw_evidence={"error": str(e), "order_id": req.order_id, "signature": req.signature}
+        )
+        raise HTTPException(status_code=400, detail="Invalid payment signature")
+
+    # Check if transaction reference is already in audit_log.jsonl to avoid duplicates
+    log_path = os.path.join(DATA_DIR, "audit_log.jsonl")
+    already_logged = False
+    if os.path.exists(log_path):
+        with open(log_path, "r") as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        entry = json.loads(line)
+                        if entry.get("txn_ref") == req.payment_id:
+                            already_logged = True
+                            break
+                    except Exception:
+                        pass
+
+    if not already_logged:
+        logger.log_transaction(
+            txn_ref=req.payment_id,
+            match_result="MATCHED",
+            category="Settlement",
+            extracted_data={"event": "payment.verified", "order_id": req.order_id},
+            action=Action.MATCH,
+            reason="Live checkout payment verified successfully",
+            source="LIVE_CHECKOUT",
+            raw_evidence={
+                "gateway_record": {
+                    "id": req.payment_id,
+                    "order_id": req.order_id,
+                    "signature": req.signature,
+                    "status": "captured"
+                },
+                "event": "payment.verified"
+            }
+        )
+        generate_report()
+
+    return {"status": "ok", "message": "Payment verified and recorded", "txn_ref": req.payment_id}
+
 @app.post("/api/webhooks/razorpay")
 async def razorpay_webhook(request: Request, x_razorpay_signature: str = Header(None)):
     raw_body = await request.body()
@@ -225,7 +309,9 @@ async def razorpay_webhook(request: Request, x_razorpay_signature: str = Header(
             category="SECURITY_EXCEPTION",
             extracted_data={"error": "Signature mismatch"},
             action=Action.QUARANTINE,
-            reason="Webhook signature verification failed"
+            reason="Webhook signature verification failed",
+            source="LIVE_WEBHOOK",
+            raw_evidence={"error": str(e), "event": "signature_mismatch"}
         )
         raise HTTPException(status_code=400, detail="Invalid signature")
 
@@ -246,7 +332,9 @@ async def razorpay_webhook(request: Request, x_razorpay_signature: str = Header(
                 category="DUPLICATE",
                 extracted_data={"event_id": event_id},
                 action=Action.EXCEPTION,
-                reason=f"Duplicate webhook event: {event_id}"
+                reason=f"Duplicate webhook event: {event_id}",
+                source="LIVE_WEBHOOK",
+                raw_evidence={"event_id": event_id, "event": "duplicate_webhook"}
             )
             return {"status": "ignored", "reason": "duplicate"}
 
@@ -258,19 +346,57 @@ async def razorpay_webhook(request: Request, x_razorpay_signature: str = Header(
     print(f"Processing genuine webhook event: {event_type} - {event_id}")
 
     # Process events
-    if event_type == "payment.captured":
+    if event_type in ("payment.captured", "payment.authorized"):
         payment_entity = payload["payload"]["payment"]["entity"]
         txn_ref = payment_entity["id"]
         
-        # Log the captured payment as a matched transaction for demo purposes
-        # In a full system, this would insert into gateway/bank tables for the matcher
+        # Dedup: skip if this payment was already logged (e.g. via verify-payment endpoint)
+        log_path = os.path.join(DATA_DIR, "audit_log.jsonl")
+        already_logged = False
+        if os.path.exists(log_path):
+            with open(log_path, "r") as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            entry = json.loads(line)
+                            if entry.get("txn_ref") == txn_ref:
+                                already_logged = True
+                                break
+                        except Exception:
+                            pass
+        
+        if not already_logged:
+            logger.log_transaction(
+                txn_ref=txn_ref,
+                match_result="MATCHED",
+                category="Settlement",
+                extracted_data={"event": event_type, "amount": payment_entity.get("amount", 0) / 100},
+                action=Action.MATCH,
+                reason=f"Razorpay {event_type} via live webhook",
+                source="LIVE_WEBHOOK",
+                raw_evidence={
+                    "gateway_record": payment_entity,
+                    "event": event_type,
+                    "order_id": payment_entity.get("order_id")
+                }
+            )
+        
+    elif event_type == "payment.failed":
+        payment_entity = payload["payload"]["payment"]["entity"]
+        txn_ref = payment_entity["id"]
+        
         logger.log_transaction(
             txn_ref=txn_ref,
-            match_result="MATCHED",
-            category=None,
-            extracted_data={"event": "payment.captured", "amount": payment_entity["amount"]},
-            action=Action.MATCH,
-            reason="Razorpay payment captured successfully"
+            match_result="FAILED",
+            category="PAYMENT_FAILED",
+            extracted_data={"event": event_type, "error_description": payment_entity.get("error_description")},
+            action=Action.EXCEPTION,
+            reason=f"Razorpay payment failed via live webhook: {payment_entity.get('error_description', 'unknown')}",
+            source="LIVE_WEBHOOK",
+            raw_evidence={
+                "gateway_record": payment_entity,
+                "event": event_type,
+            }
         )
         
     elif event_type == "refund.processed":
@@ -282,9 +408,15 @@ async def razorpay_webhook(request: Request, x_razorpay_signature: str = Header(
             txn_ref=txn_ref,
             match_result="NEEDS_CLASSIFICATION",
             category="REFUND",
-            extracted_data={"event": "refund.processed", "refund_id": refund_entity["id"], "amount": refund_entity["amount"]},
+            extracted_data={"event": "refund.processed", "refund_id": refund_entity.get("id"), "amount": refund_entity.get("amount", 0) / 100},
             action=Action.REVIEW,
-            reason="Refund processed by Razorpay"
+            reason="Refund processed by Razorpay via live webhook",
+            source="LIVE_WEBHOOK",
+            raw_evidence={
+                "gateway_record": refund_entity,
+                "event": "refund.processed",
+                "payment_id": refund_entity.get("payment_id")
+            }
         )
 
     generate_report()

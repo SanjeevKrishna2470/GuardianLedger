@@ -1,10 +1,13 @@
 {
-  "total_processed": 2,
-  "match_rate": 0.0,
-  "quarantine_count": 0,
-  "false_quarantine_rate": 0,
-  "throughput_records_per_sec": 0,
+  "total_processed": 52,
+  "match_rate": 84.61538461538461,
+  "quarantine_count": 2,
+  "false_quarantine_rate": 0.0,
+  "throughput_records_per_sec": 151.6254492720576,
   "exception_breakdown": {
+    "DUPLICATE": 2,
+    "TIMING_LAG": 1,
+    "FEE_MISMATCH": 1,
     "ORPHAN": 1,
     "AMOUNT_DRIFT": 1
   }

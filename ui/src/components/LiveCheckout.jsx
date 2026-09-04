@@ -46,15 +46,33 @@ function LiveCheckout() {
         name: 'Guardian Ledger',
         description: 'Test Transaction',
         order_id: orderData.order_id,
-        handler: function (response) {
-          // Payment was successful
-          setStatus('success');
-          setLastPayment({
-            payment_id: response.razorpay_payment_id,
-            order_id: response.razorpay_order_id,
-            signature: response.razorpay_signature,
-          });
-          setMessage(`Payment successful! ID: ${response.razorpay_payment_id}`);
+        handler: async function (response) {
+          setStatus('loading');
+          try {
+            const verifyRes = await fetch(`${API_BASE}/api/verify-payment`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                payment_id: response.razorpay_payment_id,
+                order_id: response.razorpay_order_id,
+                signature: response.razorpay_signature,
+              }),
+            });
+            if (!verifyRes.ok) {
+              const errText = await verifyRes.text();
+              throw new Error(errText || 'Payment verification failed');
+            }
+            setStatus('success');
+            setLastPayment({
+              payment_id: response.razorpay_payment_id,
+              order_id: response.razorpay_order_id,
+              signature: response.razorpay_signature,
+            });
+            setMessage(`Payment successful & recorded! ID: ${response.razorpay_payment_id}`);
+          } catch (err) {
+            setStatus('error');
+            setMessage(`Payment completed with verification warning: ${err.message}`);
+          }
         },
         prefill: {
           name: 'Test User',

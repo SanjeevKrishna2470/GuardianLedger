@@ -1,6 +1,10 @@
-
 venv/
 .venv/
 __pycache__/
 *.pyc
 .env
+.env.*
+!.env.example
+*.log
+data/processed_event_ids.jsonl
+data/decisions.jsonl

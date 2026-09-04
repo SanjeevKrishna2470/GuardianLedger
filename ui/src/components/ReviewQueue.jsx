@@ -14,14 +14,11 @@ const ReviewQueue = () => {
         if (res.ok) {
           setQueue(await res.json());
         } else {
-          throw new Error('Failed to fetch queue');
+          setQueue([]);
         }
-      } catch {
-        setQueue([
-          { txn_ref: 'TXN-1001', status: 'REVIEW', category: 'Settlement', m4_reason: 'Amount mismatch ($0.05)' },
-          { txn_ref: 'TXN-1002', status: 'EXCEPTION', category: 'Funding', m4_reason: 'Missing reference ID' },
-          { txn_ref: 'TXN-1003', status: 'QUARANTINE', category: 'Transfer', m4_reason: 'Potential duplicate' }
-        ]);
+      } catch (err) {
+        console.error('Error fetching queue:', err);
+        setQueue([]);
       } finally {
         setLoading(false);
       }

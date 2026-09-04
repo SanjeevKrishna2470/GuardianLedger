@@ -5,35 +5,46 @@ import { API_BASE } from '../config';
 const Dashboard = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [runningPipeline, setRunningPipeline] = useState(false);
+
+  const fetchData = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/dashboard`);
+      if (res.ok) {
+        const json = await res.json();
+        if (!json.error) {
+          setData(json);
+        } else {
+          setData(null);
+        }
+      } else {
+        setData(null);
+      }
+    } catch {
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/dashboard`);
-        if (res.ok) {
-          setData(await res.json());
-        } else {
-          throw new Error('Failed to fetch');
-        }
-      } catch {
-        setData({
-          match_rate: 98.5,
-          total_exceptions: 12,
-          total_quarantined: 3,
-          throughput: 1450,
-          exception_breakdown: {
-            'Amount Mismatch': 5,
-            'Date Mismatch': 4,
-            'Missing in Source B': 3
-          }
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetch(`${API_BASE}/api/queue`).catch(() => {});
     fetchData();
   }, []);
+
+  const handleRunPipeline = async () => {
+    setRunningPipeline(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/run-pipeline`, { method: 'POST' });
+      if (res.ok) {
+        const json = await res.json();
+        setData(json);
+      }
+    } catch (err) {
+      console.error('Error running pipeline:', err);
+    } finally {
+      setRunningPipeline(false);
+    }
+  };
 
   const now = new Date();
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening';
@@ -63,11 +74,21 @@ const Dashboard = () => {
     <div>
       <header className="page-header">
         <p className="text-secondary" style={{ marginBottom: '2px' }}>{greeting}</p>
-        <div className="page-header-row">
+        <div className="page-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h1>Reconciliation Dashboard</h1>
-          <span className="text-muted" style={{ fontSize: '12px' }}>
-            Last updated: {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · {dateStr}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span className="text-muted" style={{ fontSize: '12px' }}>
+              Last updated: {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · {dateStr}
+            </span>
+            <button
+              onClick={handleRunPipeline}
+              disabled={runningPipeline}
+              className="btn btn-brand btn-sm"
+              style={{ padding: '6px 14px', fontSize: '13px' }}
+            >
+              {runningPipeline ? 'Running Pipeline...' : '▶ Run Pipeline'}
+            </button>
+          </div>
         </div>
       </header>
 
