@@ -21,7 +21,7 @@ def migrate():
     print("Connecting to Postgres...")
     pg_conn = psycopg2.connect(pg_url)
     
-    tables = ["merchants", "users", "transactions", "decisions", "processed_events"]
+    tables = ["merchants", "users", "transactions", "decisions", "processed_events", "payments_ledger", "bank_statement_lines", "reconciliation_corrections"]
     
     with pg_conn.cursor() as cur:
         for table in tables:

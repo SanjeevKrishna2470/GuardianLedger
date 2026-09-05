@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from 'react';
-import { TrendingUp, AlertTriangle, ShieldAlert, Zap } from 'lucide-react';
+import { TrendingUp, AlertTriangle, ShieldAlert, Users } from 'lucide-react';
 import { API_BASE, fetchAuth } from '../config';
 
 const Dashboard = () => {
@@ -109,9 +109,26 @@ const Dashboard = () => {
           <div className="metric-label">Quarantined</div>
         </div>
         <div className="metric-card">
-          <div className="metric-icon info"><Zap size={20} /></div>
-          <div className="metric-value">{data?.throughput ?? data?.throughput_records_per_sec ?? 0}<span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)', marginLeft: '4px' }}>/s</span></div>
-          <div className="metric-label">Throughput</div>
+          <div className="metric-icon info"><Users size={20} /></div>
+          <div className="metric-value">{data?.human_agreement_rate ?? '—'}{data?.human_agreement_rate != null ? '%' : ''}</div>
+          <div className="metric-label">Human Agreement{data?.human_decision_count ? ` (${data.human_decision_count})` : ''}</div>
+        </div>
+      </div>
+
+      <div className="card" style={{ animation: 'fadeIn 0.4s ease both', animationDelay: '120ms', marginBottom: '16px' }}>
+        <div className="card-header">
+          <h2>Unmatched pile</h2>
+          <span className="text-muted" style={{ fontSize: '12px' }}>Incremental reconciliation</span>
+        </div>
+        <div className="card-body" style={{ display: 'flex', gap: '24px' }}>
+          <div>
+            <div className="metric-value" style={{ fontSize: '22px' }}>{data?.unmatched_payments ?? 0}</div>
+            <div className="metric-label">Unmatched payments</div>
+          </div>
+          <div>
+            <div className="metric-value" style={{ fontSize: '22px' }}>{data?.unmatched_bank ?? 0}</div>
+            <div className="metric-label">Unmatched bank lines</div>
+          </div>
         </div>
       </div>
 

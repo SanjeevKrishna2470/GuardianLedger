@@ -97,6 +97,7 @@ def init_db():
                 )
             ''')
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_processed_events_unique ON processed_events(merchant_id, event_id)")
+            _init_block3_tables(conn, is_pg=True)
         conn.conn.close()
     else:
         # SQLite initialization
@@ -157,7 +158,77 @@ def init_db():
                 )
             ''')
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_processed_events_unique ON processed_events(merchant_id, event_id)")
+            _init_block3_tables(conn, is_pg=False)
         conn.close()
+
+def _init_block3_tables(conn, is_pg: bool):
+    """Stateful ledger, unmatched bank pile, and retroactive-correction audit."""
+    id_col = "SERIAL PRIMARY KEY" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    conn.execute(f'''
+        CREATE TABLE IF NOT EXISTS payments_ledger (
+            merchant_id TEXT NOT NULL,
+            payment_id TEXT NOT NULL,
+            order_id TEXT,
+            amount REAL,
+            currency TEXT,
+            status TEXT NOT NULL,
+            match_status TEXT NOT NULL DEFAULT 'UNMATCHED',
+            exception_flag TEXT,
+            priority INTEGER DEFAULT 0,
+            unmatched_since TEXT,
+            authorized_at TEXT,
+            captured_at TEXT,
+            settled_at TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            PRIMARY KEY (merchant_id, payment_id)
+        )
+    ''')
+    conn.execute(f'''
+        CREATE TABLE IF NOT EXISTS bank_statement_lines (
+            id {id_col},
+            merchant_id TEXT NOT NULL,
+            external_id TEXT,
+            txn_ref TEXT,
+            amount REAL,
+            value_date TEXT,
+            fee_deducted REAL DEFAULT 0,
+            description TEXT,
+            match_status TEXT NOT NULL DEFAULT 'UNMATCHED',
+            matched_payment_id TEXT,
+            created_at TEXT,
+            UNIQUE (merchant_id, external_id)
+        )
+    ''')
+    conn.execute(f'''
+        CREATE TABLE IF NOT EXISTS reconciliation_corrections (
+            id {id_col},
+            merchant_id TEXT NOT NULL,
+            payment_id TEXT NOT NULL,
+            old_status TEXT,
+            new_status TEXT,
+            old_match_status TEXT,
+            new_match_status TEXT,
+            old_amount REAL,
+            new_amount REAL,
+            reason TEXT,
+            timestamp TEXT
+        )
+    ''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ledger_unmatched ON payments_ledger(merchant_id, match_status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_bank_unmatched ON bank_statement_lines(merchant_id, match_status)")
+    _add_column_if_missing(conn, "transactions", "priority", "INTEGER DEFAULT 0", is_pg)
+
+
+def _add_column_if_missing(conn, table, column, coltype, is_pg: bool):
+    if is_pg:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {coltype}")
+        return
+    cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    names = {row["name"] for row in cols}
+    if column not in names:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+
 
 # Initialize when imported
 init_db()

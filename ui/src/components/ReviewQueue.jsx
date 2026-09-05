@@ -87,17 +87,22 @@ const ReviewQueue = () => {
                 <th>Reference</th>
                 <th>Status</th>
                 <th>Category</th>
+                <th>Age</th>
                 <th>Reason</th>
                 <th style={{ width: '160px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {queue.map((item) => (
-                <tr key={item.txn_ref}>
+                <tr key={item.txn_ref} style={{ background: item.priority ? 'var(--color-warning-light)' : undefined }}>
                   <td>{item.txn_ref}</td>
                   <td><span className={getStatusClass(item.status || item.m4_action)}>{item.status || item.m4_action}</span></td>
-                  <td>{item.category || item.m2_category || 'â€”'}</td>
-                  <td style={{ color: 'var(--text-secondary)', maxWidth: '300px' }}>{item.m4_reason || 'â€”'}</td>
+                  <td>{item.category || item.m2_category || '—'}</td>
+                  <td>
+                    {item.days_unresolved ?? 0}d
+                    {item.priority ? <span className="status-badge exception" style={{ marginLeft: '8px' }}>Priority</span> : null}
+                  </td>
+                  <td style={{ color: 'var(--text-secondary)', maxWidth: '300px' }}>{item.m4_reason || '—'}</td>
                   <td>
                     <div className="action-group">
                       <button onClick={() => handleAction(item.txn_ref, 'approve')} className="btn btn-success btn-sm">Approve</button>

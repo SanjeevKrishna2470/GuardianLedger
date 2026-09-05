@@ -2,7 +2,15 @@ from enum import Enum
 import re
 import json
 
-# The Privileged-Action Veto / Hard Allowlist
+# ---------------------------------------------------------------------------
+# CORE INVARIANT — DO NOT WEAKEN THIS ENUM OR BYPASS IT.
+# The AI proposes; it never directly authorizes a state change.
+# Every code path that wants to act on a transaction MUST produce one of
+# these four Action values and pass through verify_proposal() below.
+# There is no fifth action, and no function anywhere may construct a
+# ledger mutation from a raw AI/LLM output. If you're tempted to add a
+# shortcut here "just for this one case" — that's the bypass. Don't.
+# ---------------------------------------------------------------------------
 class Action(Enum):
     MATCH = "MATCH"
     REVIEW = "REVIEW"
@@ -56,6 +64,9 @@ def scan_for_instructions(text):
 def verify_proposal(record, raw_evidence, proposed_action: Action):
     """
     The main Trust Boundary gate.
+    INVARIANT: the AI proposes, it never directly authorizes a state change.
+    This function is the only place a proposed Action becomes a real one —
+    nothing downstream may skip this call.
     Passes through the 4 checks and returns (Action, reason).
     """
     # 1. Privileged-action veto

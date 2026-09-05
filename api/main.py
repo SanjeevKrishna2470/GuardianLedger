@@ -4,7 +4,7 @@ import uuid
 import datetime
 import sys
 
-from fastapi import FastAPI, Request, HTTPException, Header, Depends, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, Header, Depends, BackgroundTasks, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import razorpay
@@ -13,6 +13,15 @@ import razorpay
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.trust_boundary import Action
+from engine.reconcile import (
+    apply_payment_event,
+    days_unresolved_for,
+    ingest_bank_records,
+    list_ledger,
+    parse_bank_csv,
+    run_reconciliation_sweep,
+    unmatched_pile_counts,
+)
 from report.audit_log import logger
 from report.report import generate_report
 from report.db import get_db, _PROJECT_ROOT
@@ -65,6 +74,15 @@ class MerchantKeysUpdate(BaseModel):
     key_secret: str
     webhook_secret: str
 
+MAX_BANK_CSV_BYTES = 2 * 1024 * 1024
+
+
+def _annotate_queue_item(row: dict) -> dict:
+    days = days_unresolved_for(row.get("timestamp"))
+    row["days_unresolved"] = days
+    row["priority"] = bool(row.get("priority")) or days > 3
+    return row
+
 
 # ---------------------------------------------------------------------------
 # Pipeline / dashboard
@@ -95,7 +113,9 @@ def get_review_queue(current_user: dict = Depends(get_current_user)):
         (current_user["merchant_id"],)
     ).fetchall()
     conn.close()
-    return [_row_to_dict(r) for r in rows]
+    items = [_annotate_queue_item(_row_to_dict(r)) for r in rows]
+    items.sort(key=lambda x: (not x.get("priority"), -(x.get("days_unresolved") or 0)))
+    return items
 
 @app.get("/api/transactions")
 def get_all_transactions(current_user: dict = Depends(get_current_user)):
@@ -119,6 +139,43 @@ def post_action(req: ActionRequest, current_user: dict = Depends(get_current_use
         )
     conn.close()
     return {"status": "ok", "decision": req.decision, "txn_ref": req.txn_ref}
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation
+# ---------------------------------------------------------------------------
+
+@app.post("/api/reconcile")
+def post_reconcile(current_user: dict = Depends(get_current_user)):
+    merchant_id = current_user["merchant_id"]
+    result = run_reconciliation_sweep(merchant_id)
+    result.update(unmatched_pile_counts(merchant_id))
+    return result
+
+
+@app.get("/api/ledger")
+def get_payments_ledger(current_user: dict = Depends(get_current_user)):
+    return list_ledger(current_user["merchant_id"])
+
+
+@app.post("/api/bank-statement")
+async def upload_bank_statement(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    raw = await file.read()
+    if len(raw) > MAX_BANK_CSV_BYTES:
+        raise HTTPException(status_code=413, detail="Bank statement file is too large (max 2MB).")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Bank statement must be UTF-8 CSV.")
+    records = parse_bank_csv(text)
+    if not records:
+        raise HTTPException(status_code=400, detail="No bank statement rows found.")
+    result = ingest_bank_records(current_user["merchant_id"], records)
+    result.update(unmatched_pile_counts(current_user["merchant_id"]))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -250,16 +307,23 @@ def process_webhook_event(merchant_id: str, payload: dict):
     if event_type in ("payment.captured", "payment.authorized"):
         payment_entity = payload["payload"]["payment"]["entity"]
         txn_ref = payment_entity["id"]
-
+        apply_payment_event(
+            merchant_id,
+            event_type=event_type,
+            payment_id=txn_ref,
+            order_id=payment_entity.get("order_id"),
+            amount=(payment_entity.get("amount") or 0) / 100,
+            currency=payment_entity.get("currency") or "INR",
+        )
         if not logger.is_logged(merchant_id, txn_ref):
             logger.log_transaction(
                 merchant_id=merchant_id,
                 txn_ref=txn_ref,
-                match_result="MATCHED",
+                match_result="UNMATCHED",
                 category="Settlement",
                 extracted_data={"event": event_type, "amount": payment_entity.get("amount", 0) / 100},
-                action=Action.MATCH,
-                reason=f"Razorpay {event_type} via live webhook",
+                action="RECORDED",
+                reason=f"Razorpay {event_type} recorded on the unmatched pile",
                 source="LIVE_WEBHOOK",
                 raw_evidence={
                     "gateway_record": payment_entity,
@@ -271,6 +335,14 @@ def process_webhook_event(merchant_id: str, payload: dict):
     elif event_type == "payment.failed":
         payment_entity = payload["payload"]["payment"]["entity"]
         txn_ref = payment_entity["id"]
+        apply_payment_event(
+            merchant_id,
+            event_type=event_type,
+            payment_id=txn_ref,
+            order_id=payment_entity.get("order_id"),
+            amount=(payment_entity.get("amount") or 0) / 100,
+            currency=payment_entity.get("currency") or "INR",
+        )
         logger.log_transaction(
             merchant_id=merchant_id,
             txn_ref=txn_ref,
@@ -286,6 +358,12 @@ def process_webhook_event(merchant_id: str, payload: dict):
     elif event_type == "refund.processed":
         refund_entity = payload["payload"]["refund"]["entity"]
         txn_ref = refund_entity["payment_id"]
+        apply_payment_event(
+            merchant_id,
+            event_type=event_type,
+            payment_id=txn_ref,
+            amount=(refund_entity.get("amount") or 0) / 100,
+        )
         logger.log_transaction(
             merchant_id=merchant_id,
             txn_ref=txn_ref,
@@ -305,6 +383,20 @@ def process_webhook_event(merchant_id: str, payload: dict):
                 "payment_id": refund_entity.get("payment_id"),
             },
         )
+
+    elif event_type == "settlement.processed":
+        entity = (payload.get("payload") or {}).get("settlement", {}).get("entity") or {}
+        payment_ids = list(entity.get("payment_ids") or [])
+        if entity.get("payment_id"):
+            payment_ids.append(entity["payment_id"])
+        amount = (entity.get("amount") or 0) / 100 if entity.get("amount") else None
+        for txn_ref in payment_ids:
+            apply_payment_event(
+                merchant_id,
+                event_type=event_type,
+                payment_id=txn_ref,
+                amount=amount,
+            )
 
 
 @app.post("/api/webhooks/razorpay/{merchant_id}")
@@ -366,11 +458,16 @@ async def razorpay_webhook(merchant_id: str, request: Request, background_tasks:
         return {"status": "ignored", "reason": "duplicate"}
 
     # Mark event as processed (synchronous dedup lock)
-    with conn:
-        conn.execute(
-            "INSERT INTO processed_events (merchant_id, event_id, timestamp) VALUES (?, ?, ?)",
-            (merchant_id, event_id, datetime.datetime.utcnow().isoformat()),
-        )
+       # Mark event as processed (synchronous dedup lock)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO processed_events (merchant_id, event_id, timestamp) VALUES (?, ?, ?)",
+                (merchant_id, event_id, datetime.datetime.utcnow().isoformat()),
+            )
+    except Exception:
+        conn.close()
+        return {"status": "ignored", "reason": "duplicate"}
     conn.close()
 
     # Block 2: Async Webhook Processing
