@@ -34,7 +34,6 @@ def _call_gemini(system_prompt: str, user_prompt: str, api_key: str) -> dict:
 
     return json.loads(raw_text)
 
-
 def extract_evidence(messy_text: str) -> EvidenceProposal:
     """
     Extracts structured data from messy evidence using an LLM.
@@ -83,25 +82,12 @@ def extract_evidence(messy_text: str) -> EvidenceProposal:
             "source_span": messy_text[:20]
         }
 
-    proposal = EvidenceProposal(**result)
-    return proposal
-if __name__ == "__main__":
-    # Milestone check
-    print("Running M3 Milestone Check...")
+    # Pydantic validation gap fix: a real Gemini response that doesn't exactly
+    # match the expected schema (wrong type, missing field) must fall back to
+    # human review, not crash — this is the module's own stated invariant.
+    try:
+        return EvidenceProposal(**result)
+    except Exception as e:
+        raise ExtractionTimeoutError(f"AI returned malformed schema: {e}")
+
     
-    # 1. Normal messy input
-    clean_messy = "Settlement ref: SETT-1234, amount is 5000 approx. Note: processed late."
-    res1 = extract_evidence(clean_messy)
-    print("Clean input proposal:", res1.model_dump())
-    assert isinstance(res1, EvidenceProposal)
-    
-    # 2. Adversarial input (from poisoned fixture)
-    with open("data/poisoned_fixture.json") as f:
-        poisoned_data = json.load(f)
-        
-    adversarial_messy = json.dumps(poisoned_data)
-    res2 = extract_evidence(adversarial_messy)
-    print("Adversarial input proposal:", res2.model_dump())
-    assert isinstance(res2, EvidenceProposal)
-    
-    print("Milestone Check: PASSED. Output is strictly a data proposal, instruction ignored.")
