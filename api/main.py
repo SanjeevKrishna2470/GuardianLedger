@@ -502,6 +502,10 @@ async def razorpay_webhook(merchant_id: str, request: Request, background_tasks:
     
     return {"status": "ok", "message": "processing"}
 
+class SimulateRefundRequest(BaseModel):
+    notes: str
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

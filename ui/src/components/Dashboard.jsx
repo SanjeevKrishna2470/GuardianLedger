@@ -100,8 +100,9 @@ const Dashboard = () => {
         </div>
         <div className="metric-card">
           <div className="metric-icon warning"><AlertTriangle size={20} /></div>
-          <div className="metric-value">{data?.total_exceptions ?? data?.total_processed ?? 0}</div>
-          <div className="metric-label">Exceptions</div>
+        <div className="metric-value">
+        {data?.exception_breakdown ? Object.values(data.exception_breakdown).reduce((a, b) => a + b, 0) : 0}
+        </div>
         </div>
         <div className="metric-card">
           <div className="metric-icon danger"><ShieldAlert size={20} /></div>
