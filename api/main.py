@@ -4,6 +4,9 @@ import uuid
 import datetime
 import sys
 
+from engine.trust_boundary import Action, verify_proposal
+from engine.extractor import extract_evidence, ExtractionTimeoutError
+
 from api.rate_limit import is_rate_limited
 
 WEBHOOK_MAX_ATTEMPTS = 30
@@ -359,7 +362,6 @@ def process_webhook_event(merchant_id: str, payload: dict):
             source="LIVE_WEBHOOK",
             raw_evidence={"gateway_record": payment_entity, "event": event_type},
         )
-
     elif event_type == "refund.processed":
         refund_entity = payload["payload"]["refund"]["entity"]
         txn_ref = refund_entity["payment_id"]
@@ -369,6 +371,28 @@ def process_webhook_event(merchant_id: str, payload: dict):
             payment_id=txn_ref,
             amount=(refund_entity.get("amount") or 0) / 100,
         )
+
+        notes = refund_entity.get("notes")
+        ai_proposal = None
+        if notes:
+            try:
+                proposal = extract_evidence(json.dumps(notes) if isinstance(notes, dict) else str(notes))
+                ai_proposal = proposal.model_dump()
+            except ExtractionTimeoutError as e:
+                ai_proposal = {"error": str(e)}
+
+        raw_evidence = {
+            "gateway_record": refund_entity,
+            "event": "refund.processed",
+            "payment_id": refund_entity.get("payment_id"),
+            "notes": notes,
+        }
+
+        # M4 gate: refund notes are free text and attacker-reachable, exactly the
+        # shape of input the trust boundary exists to catch. Nothing here is
+        # marked resolved without passing through verify_proposal first.
+        final_action, reason = verify_proposal({}, raw_evidence, Action.REVIEW)
+
         logger.log_transaction(
             merchant_id=merchant_id,
             txn_ref=txn_ref,
@@ -378,17 +402,13 @@ def process_webhook_event(merchant_id: str, payload: dict):
                 "event": "refund.processed",
                 "refund_id": refund_entity.get("id"),
                 "amount": refund_entity.get("amount", 0) / 100,
+                "ai_proposal": ai_proposal,
             },
-            action=Action.REVIEW,
-            reason="Refund processed by Razorpay via live webhook",
+            action=final_action,
+            reason=reason,
             source="LIVE_WEBHOOK",
-            raw_evidence={
-                "gateway_record": refund_entity,
-                "event": "refund.processed",
-                "payment_id": refund_entity.get("payment_id"),
-            },
+            raw_evidence=raw_evidence,
         )
-
     elif event_type == "settlement.processed":
         entity = (payload.get("payload") or {}).get("settlement", {}).get("entity") or {}
         payment_ids = list(entity.get("payment_ids") or [])
