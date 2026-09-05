@@ -642,15 +642,17 @@ def list_ledger(merchant_id: str) -> list:
 
 def human_agreement_stats(merchant_id: str, last_n: int = 100) -> dict:
     """
-    Accuracy going forward: share of human reviewer decisions that agree
-    (approve) vs disagree (reject) with AI-assisted / engine-proposed items.
+    Share of human reviewer decisions that agree (approve) vs disagree (reject)
+    with the AI-assisted / engine-proposed action they were reviewing.
     Replaces compare-against-answer-key measurement.
     """
     conn = get_db()
     rows = conn.execute(
         """
-        SELECT d.decision
+        SELECT d.decision, t.m4_action, t.m2_category
           FROM decisions d
+          JOIN transactions t
+            ON t.merchant_id = d.merchant_id AND t.txn_ref = d.txn_ref
          WHERE d.merchant_id = ?
          ORDER BY d.id DESC
          LIMIT ?
@@ -658,7 +660,7 @@ def human_agreement_stats(merchant_id: str, last_n: int = 100) -> dict:
         (merchant_id, last_n),
     ).fetchall()
     conn.close()
-    decisions = [dict(r)["decision"] for r in rows]
+    decisions = [dict(r) for r in rows]
     if not decisions:
         return {
             "human_agreement_rate": None,
@@ -666,8 +668,8 @@ def human_agreement_stats(merchant_id: str, last_n: int = 100) -> dict:
             "agreements": 0,
             "disagreements": 0,
         }
-    agreements = sum(1 for d in decisions if str(d).lower() in ("approve", "approved", "agree"))
-    disagreements = sum(1 for d in decisions if str(d).lower() in ("reject", "rejected", "disagree"))
+    agreements = sum(1 for d in decisions if str(d["decision"]).lower() in ("approve", "approved", "agree"))
+    disagreements = sum(1 for d in decisions if str(d["decision"]).lower() in ("reject", "rejected", "disagree"))
     counted = agreements + disagreements
     rate = round((agreements / counted) * 100, 2) if counted else None
     return {
@@ -676,7 +678,6 @@ def human_agreement_stats(merchant_id: str, last_n: int = 100) -> dict:
         "agreements": agreements,
         "disagreements": disagreements,
     }
-
 
 def days_unresolved_for(timestamp, now=None) -> int:
     ts = _parse_dt(timestamp)

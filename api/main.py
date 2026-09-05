@@ -4,6 +4,11 @@ import uuid
 import datetime
 import sys
 
+from api.rate_limit import is_rate_limited
+
+WEBHOOK_MAX_ATTEMPTS = 30
+WEBHOOK_WINDOW_SECONDS = 60
+
 from fastapi import FastAPI, Request, HTTPException, Header, Depends, BackgroundTasks, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -401,6 +406,8 @@ def process_webhook_event(merchant_id: str, payload: dict):
 
 @app.post("/api/webhooks/razorpay/{merchant_id}")
 async def razorpay_webhook(merchant_id: str, request: Request, background_tasks: BackgroundTasks, x_razorpay_signature: str = Header(None)):
+    if is_rate_limited(f"webhook:{merchant_id}", WEBHOOK_MAX_ATTEMPTS, WEBHOOK_WINDOW_SECONDS):
+        raise HTTPException(status_code=429, detail="Too many webhook requests for this merchant.")
     raw_body = await request.body()
     
     conn = get_db()

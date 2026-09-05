@@ -8,6 +8,11 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from report.db import get_db
 
+
+
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 60
+
 # Constants
 SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
 ALGORITHM = "HS256"
@@ -93,9 +98,19 @@ def signup(user: UserCreate):
     )
     return {"access_token": access_token, "token_type": "bearer", "merchant_id": merchant_id}
 
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from api.rate_limit import is_rate_limited
 
 @router.post("/api/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends()):
+def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
+    client_ip = request.client.host if request.client else "unknown"
+    limiter_key = f"login:{client_ip}:{form_data.username.lower()}"
+    if is_rate_limited(limiter_key, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again in a minute.",
+        )
+
     conn = get_db()
     user = conn.execute("SELECT * FROM users WHERE email = ?", (form_data.username,)).fetchone()
     conn.close()
